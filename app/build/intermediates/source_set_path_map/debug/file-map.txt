@@ -1,0 +1,7 @@
+com.raj.ffscanner.app-pngs-0 /workspaces/ff-scanner-android/app/build/generated/res/pngs/debug
+com.raj.ffscanner.app-resValues-1 /workspaces/ff-scanner-android/app/build/generated/res/resValues/debug
+com.raj.ffscanner.app-packageDebugResources-2 /workspaces/ff-scanner-android/app/build/intermediates/incremental/debug/packageDebugResources/merged.dir
+com.raj.ffscanner.app-packageDebugResources-3 /workspaces/ff-scanner-android/app/build/intermediates/incremental/debug/packageDebugResources/stripped.dir
+com.raj.ffscanner.app-merged_res-4 /workspaces/ff-scanner-android/app/build/intermediates/merged_res/debug
+com.raj.ffscanner.app-debug-5 /workspaces/ff-scanner-android/app/src/debug/res
+com.raj.ffscanner.app-main-6 /workspaces/ff-scanner-android/app/src/main/res

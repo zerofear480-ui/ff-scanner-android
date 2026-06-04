@@ -1,0 +1,44 @@
+1<?xml version="1.0" encoding="utf-8"?>
+2<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+3    package="com.raj.ffscanner"
+4    android:versionCode="1"
+5    android:versionName="1.0" >
+6
+7    <uses-sdk
+8        android:minSdkVersion="24"
+9        android:targetSdkVersion="34" />
+10
+11    <uses-permission android:name="android.permission.CAMERA" />
+11-->/workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:4:5-64
+11-->/workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:4:22-62
+12
+13    <application
+13-->/workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:6:5-22:19
+14        android:allowBackup="true"
+14-->/workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:7:9-35
+15        android:debuggable="true"
+16        android:extractNativeLibs="false"
+17        android:label="FF Scanner"
+17-->/workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:8:9-35
+18        android:theme="@android:style/Theme.Material.Light.NoActionBar" >
+18-->/workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:9:9-72
+19        <activity
+19-->/workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:11:9-20:20
+20            android:name="com.raj.ffscanner.MainActivity"
+20-->/workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:12:13-41
+21            android:exported="true" >
+21-->/workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:13:13-36
+22            <intent-filter>
+22-->/workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:15:13-18:29
+23                <action android:name="android.intent.action.MAIN" />
+23-->/workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:16:17-68
+23-->/workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:16:25-66
+24
+25                <category android:name="android.intent.category.LAUNCHER" />
+25-->/workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:17:17-76
+25-->/workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:17:27-74
+26            </intent-filter>
+27        </activity>
+28    </application>
+29
+30</manifest>
