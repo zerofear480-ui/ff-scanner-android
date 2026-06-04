@@ -1,9 +1,9 @@
 -- Merging decision tree log ---
 manifest
-ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:2:1-26:12
-INJECTED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:2:1-26:12
-INJECTED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:2:1-26:12
-INJECTED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:2:1-26:12
+ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:2:1-34:12
+INJECTED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:2:1-34:12
+INJECTED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:2:1-34:12
+INJECTED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:2:1-34:12
 MERGED from [com.google.mlkit:text-recognition:16.0.1] /home/codespace/.gradle/caches/transforms-4/c42d8d845a8bc1a7bdb71e9db5ea54b7/transformed/jetified-text-recognition-16.0.1/AndroidManifest.xml:2:1-7:12
 MERGED from [com.google.android.gms:play-services-mlkit-text-recognition:19.0.1] /home/codespace/.gradle/caches/transforms-4/19dea2409820d4e96548972794709686/transformed/jetified-play-services-mlkit-text-recognition-19.0.1/AndroidManifest.xml:2:1-8:12
 MERGED from [com.google.mlkit:text-recognition-bundled-common:17.0.0] /home/codespace/.gradle/caches/transforms-4/41bfb3e3a524c16a29dfde0e80c76e4d/transformed/jetified-text-recognition-bundled-common-17.0.0/AndroidManifest.xml:2:1-7:12
@@ -67,9 +67,21 @@ uses-permission#android.permission.CAMERA
 ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:5:5-64
 	android:name
 		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:5:22-62
+uses-permission#android.permission.FOREGROUND_SERVICE
+ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:6:5-76
+	android:name
+		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:6:22-74
+uses-permission#android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION
+ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:7:5-93
+	android:name
+		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:7:22-91
+uses-permission#android.permission.POST_NOTIFICATIONS
+ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:8:5-76
+	android:name
+		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:8:22-74
 application
-ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:7:5-24:19
-INJECTED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:7:5-24:19
+ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:10:5-32:19
+INJECTED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:10:5-32:19
 MERGED from [com.google.android.gms:play-services-mlkit-text-recognition-common:19.1.0] /home/codespace/.gradle/caches/transforms-4/fe16e59160d4a5da400b10cb480e18cf/transformed/jetified-play-services-mlkit-text-recognition-common-19.1.0/AndroidManifest.xml:8:5-16:19
 MERGED from [com.google.android.gms:play-services-mlkit-text-recognition-common:19.1.0] /home/codespace/.gradle/caches/transforms-4/fe16e59160d4a5da400b10cb480e18cf/transformed/jetified-play-services-mlkit-text-recognition-common-19.1.0/AndroidManifest.xml:8:5-16:19
 MERGED from [com.google.mlkit:vision-common:17.3.0] /home/codespace/.gradle/caches/transforms-4/0bb66969c9fbffb5c44cc3900c52e7e1/transformed/jetified-vision-common-17.3.0/AndroidManifest.xml:8:5-16:19
@@ -103,29 +115,37 @@ MERGED from [com.google.android.odml:image:1.0.0-beta1] /home/codespace/.gradle/
 	android:appComponentFactory
 		ADDED from [androidx.core:core:1.9.0] /home/codespace/.gradle/caches/transforms-4/76fec236f4b65a85d557b3c4b9b7916d/transformed/core-1.9.0/AndroidManifest.xml:28:18-86
 	android:label
-		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:10:9-35
+		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:13:9-35
 	android:allowBackup
-		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:8:9-35
+		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:11:9-35
 	android:theme
-		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:11:9-72
+		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:14:9-72
 	android:usesCleartextTraffic
-		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:9:9-44
+		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:12:9-44
 activity#com.raj.ffscanner.MainActivity
-ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:13:9-22:20
+ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:16:9-25:20
 	android:exported
-		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:15:13-36
+		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:18:13-36
 	android:name
-		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:14:13-41
+		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:17:13-41
 intent-filter#action:name:android.intent.action.MAIN+category:name:android.intent.category.LAUNCHER
-ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:17:13-20:29
+ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:20:13-23:29
 action#android.intent.action.MAIN
-ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:18:17-68
+ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:21:17-68
 	android:name
-		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:18:25-66
+		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:21:25-66
 category#android.intent.category.LAUNCHER
-ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:19:17-76
+ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:22:17-76
 	android:name
-		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:19:27-74
+		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:22:27-74
+service#com.raj.ffscanner.ScreenCaptureService
+ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:27:9-30:62
+	android:exported
+		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:29:13-37
+	android:foregroundServiceType
+		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:30:13-60
+	android:name
+		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:28:13-49
 uses-sdk
 INJECTED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml reason: use-sdk injection requested
 INJECTED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml

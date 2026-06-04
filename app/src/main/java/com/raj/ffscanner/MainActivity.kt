@@ -2,6 +2,7 @@ package com.raj.ffscanner
 
 import android.app.Activity
 import android.content.Intent
+import android.os.Build
 import android.graphics.Bitmap
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
@@ -141,7 +142,16 @@ class MainActivity : Activity() {
         )
 
         scanning = true
+        
+        val serviceIntent = Intent(this, ScreenCaptureService::class.java)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent)
+        } else {
+            startService(serviceIntent)
+        }
+
         status.text = "Status: Scanner started"
+    
         scanLoop()
     }
 
@@ -257,7 +267,10 @@ class MainActivity : Activity() {
         virtualDisplay?.release()
         imageReader?.close()
         projection?.stop()
+        
+        stopService(Intent(this, ScreenCaptureService::class.java))
         status.text = "Status: Scanner stopped"
+    
     }
 
     data class PlayerData(
