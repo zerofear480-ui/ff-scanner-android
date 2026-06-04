@@ -2,6 +2,7 @@ package com.raj.ffscanner
 
 import android.app.*
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
@@ -35,17 +36,39 @@ class ScreenCaptureService : Service() {
     private var imageReader: ImageReader? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var running = false
-
     private var apiUrl = "http://13.204.87.106:8000/api/ocr-scan"
+
+    private val projectionCallback = object : MediaProjection.Callback() {
+        override fun onStop() {
+            stopScanner()
+        }
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         apiUrl = intent?.getStringExtra("apiUrl") ?: apiUrl
 
         createChannel()
-        startForeground(notificationId, buildNotification("Capturing screen for OCR"))
+        val notification = buildNotification("Capturing screen for OCR")
 
-        val resultCode = intent?.getIntExtra("resultCode", Activity.RESULT_CANCELED) ?: Activity.RESULT_CANCELED
-        val data = intent?.getParcelableExtra<Intent>("data")
+        if (Build.VERSION.SDK_INT >= 29) {
+            startForeground(
+                notificationId,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            )
+        } else {
+            startForeground(notificationId, notification)
+        }
+
+        val resultCode = intent?.getIntExtra("resultCode", Activity.RESULT_CANCELED)
+            ?: Activity.RESULT_CANCELED
+
+        val data = if (Build.VERSION.SDK_INT >= 33) {
+            intent?.getParcelableExtra("data", Intent::class.java)
+        } else {
+            @Suppress("DEPRECATION")
+            intent?.getParcelableExtra<Intent>("data")
+        }
 
         if (resultCode == Activity.RESULT_OK && data != null) {
             startProjection(resultCode, data)
@@ -53,16 +76,19 @@ class ScreenCaptureService : Service() {
             stopSelf()
         }
 
-        return START_STICKY
+        return START_NOT_STICKY
     }
 
     private fun startProjection(resultCode: Int, data: Intent) {
         val manager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         projection = manager.getMediaProjection(resultCode, data)
 
+        projection?.registerCallback(projectionCallback, handler)
+
         val wm = getSystemService(WINDOW_SERVICE) as WindowManager
         val metrics = DisplayMetrics()
-        wm.defaultDisplay.getMetrics(metrics)
+        @Suppress("DEPRECATION")
+        wm.defaultDisplay.getRealMetrics(metrics)
 
         imageReader = ImageReader.newInstance(
             metrics.widthPixels,
@@ -79,7 +105,7 @@ class ScreenCaptureService : Service() {
             DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
             imageReader?.surface,
             null,
-            null
+            handler
         )
 
         running = true
@@ -97,39 +123,42 @@ class ScreenCaptureService : Service() {
     }
 
     private fun captureAndOcr() {
-        val reader = imageReader ?: return
-        val image = reader.acquireLatestImage() ?: return
+        try {
+            val reader = imageReader ?: return
+            val image = reader.acquireLatestImage() ?: return
 
-        val plane = image.planes[0]
-        val buffer: ByteBuffer = plane.buffer
-        val pixelStride = plane.pixelStride
-        val rowStride = plane.rowStride
-        val rowPadding = rowStride - pixelStride * image.width
+            val plane = image.planes[0]
+            val buffer: ByteBuffer = plane.buffer
+            val pixelStride = plane.pixelStride
+            val rowStride = plane.rowStride
+            val rowPadding = rowStride - pixelStride * image.width
 
-        val bitmap = Bitmap.createBitmap(
-            image.width + rowPadding / pixelStride,
-            image.height,
-            Bitmap.Config.ARGB_8888
-        )
+            val bitmap = Bitmap.createBitmap(
+                image.width + rowPadding / pixelStride,
+                image.height,
+                Bitmap.Config.ARGB_8888
+            )
 
-        bitmap.copyPixelsFromBuffer(buffer)
-        image.close()
+            bitmap.copyPixelsFromBuffer(buffer)
+            image.close()
 
-        val cropped = Bitmap.createBitmap(bitmap, 0, 0, image.width, image.height)
-        val inputImage = InputImage.fromBitmap(cropped, 0)
+            val cropped = Bitmap.createBitmap(bitmap, 0, 0, image.width, image.height)
+            val inputImage = InputImage.fromBitmap(cropped, 0)
 
-        recognizer.process(inputImage)
-            .addOnSuccessListener { result ->
-                val players = parsePlayers(result.text)
-                if (players.isNotEmpty()) {
-                    sendPlayers(players)
+            recognizer.process(inputImage)
+                .addOnSuccessListener { result ->
+                    val players = parsePlayers(result.text)
+                    if (players.isNotEmpty()) {
+                        sendPlayers(players)
+                    }
                 }
-            }
+        } catch (e: Exception) {
+            // keep service alive
+        }
     }
 
     private fun parsePlayers(text: String): List<PlayerData> {
         val players = mutableListOf<PlayerData>()
-
         val regex = Regex("""^\s*(\d{1,2})\s+(.+?)\s+(\d{1,2})\s*$""")
 
         text.lines().forEach { line ->
@@ -177,6 +206,20 @@ class ScreenCaptureService : Service() {
         })
     }
 
+    private fun stopScanner() {
+        running = false
+        try { virtualDisplay?.release() } catch (_: Exception) {}
+        try { imageReader?.close() } catch (_: Exception) {}
+        try { projection?.unregisterCallback(projectionCallback) } catch (_: Exception) {}
+        try { projection?.stop() } catch (_: Exception) {}
+        stopSelf()
+    }
+
+    override fun onDestroy() {
+        stopScanner()
+        super.onDestroy()
+    }
+
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
@@ -205,14 +248,6 @@ class ScreenCaptureService : Service() {
                 .setOngoing(true)
                 .build()
         }
-    }
-
-    override fun onDestroy() {
-        running = false
-        virtualDisplay?.release()
-        imageReader?.close()
-        projection?.stop()
-        super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

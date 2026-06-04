@@ -1,7 +1,9 @@
 package com.raj.ffscanner
 
+import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Bundle
@@ -13,10 +15,12 @@ class MainActivity : Activity() {
     private lateinit var status: TextView
     private lateinit var apiInput: EditText
 
-    private var apiUrl = "http://13.204.87.106:8000/api/ocr-scan"
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+
+        if (Build.VERSION.SDK_INT >= 33) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 2001)
+        }
 
         val layout = LinearLayout(this)
         layout.orientation = LinearLayout.VERTICAL
@@ -31,7 +35,7 @@ class MainActivity : Activity() {
         status.textSize = 17f
 
         apiInput = EditText(this)
-        apiInput.setText(apiUrl)
+        apiInput.setText("http://13.204.87.106:8000/api/ocr-scan")
 
         val startBtn = Button(this)
         startBtn.text = "START OCR SCANNER"
@@ -40,7 +44,6 @@ class MainActivity : Activity() {
         stopBtn.text = "STOP SCANNER"
 
         startBtn.setOnClickListener {
-            apiUrl = apiInput.text.toString()
             val manager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
             startActivityForResult(manager.createScreenCaptureIntent(), requestCode)
         }
@@ -74,7 +77,7 @@ class MainActivity : Activity() {
                 startService(serviceIntent)
             }
 
-            status.text = "Status: Scanner service started"
+            status.text = "Status: Scanner running"
         } else {
             status.text = "Status: Permission denied"
         }
