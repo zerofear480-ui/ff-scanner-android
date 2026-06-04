@@ -8,6 +8,7 @@
         android:minSdkVersion="24"
         android:targetSdkVersion="34" />
 
+    <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.CAMERA" />
 
     <application
@@ -15,7 +16,8 @@
         android:debuggable="true"
         android:extractNativeLibs="false"
         android:label="FF Scanner"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar" >
+        android:theme="@android:style/Theme.Material.Light.NoActionBar"
+        android:usesCleartextTraffic="true" >
         <activity
             android:name="com.raj.ffscanner.MainActivity"
             android:exported="true" >

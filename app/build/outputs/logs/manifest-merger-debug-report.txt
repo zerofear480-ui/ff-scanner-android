@@ -1,9 +1,9 @@
 -- Merging decision tree log ---
 manifest
-ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:2:1-24:12
-INJECTED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:2:1-24:12
-INJECTED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:2:1-24:12
-INJECTED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:2:1-24:12
+ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:2:1-26:12
+INJECTED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:2:1-26:12
+INJECTED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:2:1-26:12
+INJECTED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:2:1-26:12
 	package
 		INJECTED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml
 	android:versionName
@@ -12,37 +12,43 @@ INJECTED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:2:
 		INJECTED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml
 	xmlns:android
 		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:2:11-69
-uses-permission#android.permission.CAMERA
-ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:4:5-64
+uses-permission#android.permission.INTERNET
+ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:4:5-66
 	android:name
-		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:4:22-62
+		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:4:22-64
+uses-permission#android.permission.CAMERA
+ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:5:5-64
+	android:name
+		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:5:22-62
 application
-ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:6:5-22:19
-INJECTED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:6:5-22:19
+ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:7:5-24:19
+INJECTED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:7:5-24:19
 	android:extractNativeLibs
 		INJECTED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml
 	android:label
-		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:8:9-35
+		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:10:9-35
 	android:allowBackup
-		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:7:9-35
+		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:8:9-35
 	android:theme
-		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:9:9-72
+		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:11:9-72
+	android:usesCleartextTraffic
+		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:9:9-44
 activity#com.raj.ffscanner.MainActivity
-ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:11:9-20:20
+ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:13:9-22:20
 	android:exported
-		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:13:13-36
+		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:15:13-36
 	android:name
-		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:12:13-41
+		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:14:13-41
 intent-filter#action:name:android.intent.action.MAIN+category:name:android.intent.category.LAUNCHER
-ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:15:13-18:29
+ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:17:13-20:29
 action#android.intent.action.MAIN
-ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:16:17-68
+ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:18:17-68
 	android:name
-		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:16:25-66
+		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:18:25-66
 category#android.intent.category.LAUNCHER
-ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:17:17-76
+ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:19:17-76
 	android:name
-		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:17:27-74
+		ADDED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml:19:27-74
 uses-sdk
 INJECTED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml reason: use-sdk injection requested
 INJECTED from /workspaces/ff-scanner-android/app/src/main/AndroidManifest.xml
