@@ -185,12 +185,13 @@ class ScreenCaptureService : Service() {
 
             val inputImage = InputImage.fromBitmap(cropped, 0)
 
-            val nameW = (cropped.width * 0.74f).toInt()
-            val killX = (cropped.width * 0.62f).toInt()
+            val nameW = (cropped.width * 0.72f).toInt()
+            val killX = (cropped.width * 0.78f).toInt()
 
             val nameCrop = Bitmap.createBitmap(cropped, 0, 0, nameW, cropped.height)
             val rawKillCrop = Bitmap.createBitmap(cropped, killX, 0, cropped.width - killX, cropped.height)
             val killCrop = preprocessKillCrop(rawKillCrop)
+            uploadKillCropDebug(killCrop)
 
             recognizer.process(InputImage.fromBitmap(nameCrop, 0))
                 .addOnSuccessListener { nameResult ->
@@ -303,6 +304,39 @@ class ScreenCaptureService : Service() {
         }
 
         return nums.take(20)
+    }
+
+
+    private fun uploadKillCropDebug(cropped: Bitmap) {
+        try {
+            val bos = ByteArrayOutputStream()
+            cropped.compress(Bitmap.CompressFormat.PNG, 100, bos)
+
+            val body = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart(
+                    "file",
+                    "kill_crop.png",
+                    bos.toByteArray().toRequestBody("image/png".toMediaType())
+                )
+                .build()
+
+            val url = apiUrl.replace("/api/ocr-scan", "/api/kill-debug")
+            val req = Request.Builder().url(url).post(body).build()
+
+            client.newCall(req).enqueue(object : Callback {
+                override fun onFailure(call: Call, e: java.io.IOException) {
+                    OverlayService.addLog("Kill crop upload failed: ${e.message}")
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    OverlayService.addLog("Kill crop uploaded ${response.code}")
+                    response.close()
+                }
+            })
+        } catch (e: Exception) {
+            OverlayService.addLog("Kill crop upload error: ${e.message}")
+        }
     }
 
     private fun uploadCropDebug(cropped: Bitmap) {
