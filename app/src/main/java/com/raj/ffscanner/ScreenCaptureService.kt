@@ -178,7 +178,7 @@ class ScreenCaptureService : Service() {
             val cropped = Bitmap.createBitmap(bitmap, x, y, w, h)
 
             try {
-                val file = File(getExternalFilesDir(null), "crop_debug.png")
+                val file = File("/storage/emulated/0/Download/crop_debug.png")
                 FileOutputStream(file).use { out ->
                     cropped.compress(Bitmap.CompressFormat.PNG, 100, out)
                 }
