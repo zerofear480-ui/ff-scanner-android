@@ -184,21 +184,47 @@ class ScreenCaptureService : Service() {
 
             val inputImage = InputImage.fromBitmap(cropped, 0)
 
-            recognizer.process(inputImage)
-                .addOnSuccessListener { result ->
-                    OverlayService.addLog("OCR length=${result.text.length}")
-                    sendDebug(result.text, x, y, w, h)
+            val nameW = (cropped.width * 0.78f).toInt()
+            val killX = (cropped.width * 0.72f).toInt()
 
-                    val players = parsePlayers(result.text)
-                    OverlayService.addLog("Players found=${players.size}")
+            val nameCrop = Bitmap.createBitmap(cropped, 0, 0, nameW, cropped.height)
+            val killCrop = Bitmap.createBitmap(cropped, killX, 0, cropped.width - killX, cropped.height)
 
-                    if (players.isNotEmpty()) {
-                        sendPlayers(players)
-                    }
+            recognizer.process(InputImage.fromBitmap(nameCrop, 0))
+                .addOnSuccessListener { nameResult ->
+                    recognizer.process(InputImage.fromBitmap(killCrop, 0))
+                        .addOnSuccessListener { killResult ->
+
+                            OverlayService.addLog("Name OCR length=${nameResult.text.length}")
+                            OverlayService.addLog("Kill OCR text=${killResult.text.take(80)}")
+
+                            val namesOnly = parseNamesOnly(nameResult.text)
+                            val killsOnly = parseKillsOnly(killResult.text)
+
+                            val players = mutableListOf<PlayerData>()
+
+                            namesOnly.forEachIndexed { index, name ->
+                                val kill = killsOnly.getOrNull(index) ?: 0
+                                players.add(PlayerData(index + 1, name, kill))
+                            }
+
+                            sendDebug(
+                                "NAMES:\\n${nameResult.text}\\n\\nKILLS:\\n${killResult.text}",
+                                x, y, w, h
+                            )
+
+                            OverlayService.addLog("Advanced players=${players.size}")
+
+                            if (players.isNotEmpty()) {
+                                sendPlayers(players)
+                            }
+                        }
+                        .addOnFailureListener {
+                            OverlayService.addLog("Kill OCR error: ${it.message}")
+                        }
                 }
                 .addOnFailureListener {
-                    OverlayService.addLog("OCR error: ${it.message}")
-                    sendDebug("OCR_ERROR: ${it.message}", x, y, w, h)
+                    OverlayService.addLog("Name OCR error: ${it.message}")
                 }
 
         } catch (e: Exception) {
@@ -207,6 +233,54 @@ class ScreenCaptureService : Service() {
         }
     }
 
+    private fun parseNamesOnly(text: String): List<String> {
+        val names = mutableListOf<String>()
+
+        val ignore = listOf(
+            "players", "safe", "zone", "bermuda", "game", "hp", "ep",
+            "alive", "spectating", "permission", "projection", "starting",
+            "debug", "sent", "capture", "crop", "scale", "ocr", "length",
+            "booyah", "paid", "app", "ok", "final", "round", "service",
+            "destroyed", "stopped", "tick"
+        )
+
+        text.lines().forEach { raw ->
+            var line = raw.trim()
+                .replace("|", " ")
+                .replace(">", "")
+                .replace(")", "")
+                .replace("(", "")
+                .replace("  ", " ")
+
+            if (line.length < 3) return@forEach
+            if (line.all { it.isDigit() }) return@forEach
+
+            val lower = line.lowercase()
+            if (ignore.any { lower.contains(it) }) return@forEach
+
+            line = line.replace(Regex("""[^A-Za-z0-9_ .!'₹-]"""), "").trim()
+
+            if (line.length < 3) return@forEach
+            if (line.split(" ").size > 5) return@forEach
+
+            names.add(line)
+        }
+
+        return names.take(20)
+    }
+
+    private fun parseKillsOnly(text: String): List<Int> {
+        val nums = mutableListOf<Int>()
+
+        Regex("""\b\d{1,2}\b""").findAll(text).forEach { m ->
+            val n = m.value.toIntOrNull()
+            if (n != null && n in 0..99) {
+                nums.add(n)
+            }
+        }
+
+        return nums.take(20)
+    }
 
     private fun uploadCropDebug(cropped: Bitmap) {
         try {
