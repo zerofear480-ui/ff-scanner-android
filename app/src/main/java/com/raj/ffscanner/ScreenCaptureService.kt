@@ -194,36 +194,43 @@ class ScreenCaptureService : Service() {
 
             recognizer.process(InputImage.fromBitmap(nameCrop, 0))
                 .addOnSuccessListener { nameResult ->
-                    recognizer.process(InputImage.fromBitmap(killCrop, 0))
-                        .addOnSuccessListener { killResult ->
+                    val namesOnly = parseNamesOnly(nameResult.text)
+                    OverlayService.addLog("Name OCR length=${nameResult.text.length}")
 
-                            OverlayService.addLog("Name OCR length=${nameResult.text.length}")
-                            OverlayService.addLog("Kill OCR text=${killResult.text.take(80)}")
+                    val players = mutableListOf<PlayerData>()
+                    val rowH = killCrop.height / namesOnly.size.coerceAtLeast(1)
 
-                            val namesOnly = parseNamesOnly(nameResult.text)
-                            val killsOnly = parseKillsOnly(killResult.text)
-
-                            val players = mutableListOf<PlayerData>()
-
-                            namesOnly.forEachIndexed { index, name ->
-                                val kill = killsOnly.getOrNull(index) ?: 0
-                                players.add(PlayerData(index + 1, name, kill))
-                            }
-
-                            sendDebug(
-                                "NAMES:\\n${nameResult.text}\\n\\nKILLS:\\n${killResult.text}",
-                                x, y, w, h
-                            )
-
-                            OverlayService.addLog("Advanced players=${players.size}")
-
-                            if (players.isNotEmpty()) {
-                                sendPlayers(players)
-                            }
+                    fun readKillRow(index: Int) {
+                        if (index >= namesOnly.size) {
+                            sendDebug("NAMES:\\n${nameResult.text}\\n\\nROW OCR DONE", x, y, w, h)
+                            OverlayService.addLog("Row-wise players=${players.size}")
+                            if (players.isNotEmpty()) sendPlayers(players)
+                            return
                         }
-                        .addOnFailureListener {
-                            OverlayService.addLog("Kill OCR error: ${it.message}")
-                        }
+
+                        val rowY = (index * rowH).coerceAtLeast(0).coerceAtMost(killCrop.height - 1)
+                        val safeH = rowH.coerceAtLeast(25).coerceAtMost(killCrop.height - rowY)
+
+                        val rowCrop = Bitmap.createBitmap(killCrop, 0, rowY, killCrop.width, safeH)
+
+                        recognizer.process(InputImage.fromBitmap(rowCrop, 0))
+                            .addOnSuccessListener { rowResult ->
+                                val nums = parseKillsOnly(rowResult.text)
+                                val kill = nums.firstOrNull() ?: 0
+
+                                OverlayService.addLog("Row ${index + 1}: ${namesOnly[index]} = $kill")
+
+                                players.add(PlayerData(index + 1, namesOnly[index], kill))
+                                readKillRow(index + 1)
+                            }
+                            .addOnFailureListener {
+                                OverlayService.addLog("Row ${index + 1} kill OCR fail")
+                                players.add(PlayerData(index + 1, namesOnly[index], 0))
+                                readKillRow(index + 1)
+                            }
+                    }
+
+                    readKillRow(0)
                 }
                 .addOnFailureListener {
                     OverlayService.addLog("Name OCR error: ${it.message}")
