@@ -210,7 +210,7 @@ class ScreenCaptureService : Service() {
                         val rowTop = (cy - 38).coerceAtLeast(0)
                         val rowH = 76.coerceAtMost(killCrop.height - rowTop)
                         val rowCrop = Bitmap.createBitmap(killCrop, 0, rowTop, killCrop.width, rowH)
-                        val bigRow = upscaleBitmap(rowCrop, 4)
+                        val bigRow = preprocessDigitRow(rowCrop)
 
                         recognizer.process(InputImage.fromBitmap(bigRow, 0))
                             .addOnSuccessListener { r ->
@@ -362,6 +362,25 @@ class ScreenCaptureService : Service() {
         return list
     }
 
+
+
+    private fun preprocessDigitRow(src: Bitmap): Bitmap {
+        val scaled = Bitmap.createScaledBitmap(src, src.width * 6, src.height * 6, false)
+        val out = Bitmap.createBitmap(scaled.width, scaled.height, Bitmap.Config.ARGB_8888)
+
+        for (y in 0 until scaled.height) {
+            for (x in 0 until scaled.width) {
+                val c = scaled.getPixel(x, y)
+                val r = Color.red(c)
+                val g = Color.green(c)
+                val b = Color.blue(c)
+                val gray = (r * 0.3 + g * 0.59 + b * 0.11).toInt()
+                val v = if (gray > 105) 255 else 0
+                out.setPixel(x, y, Color.rgb(v, v, v))
+            }
+        }
+        return out
+    }
 
     private fun upscaleBitmap(src: Bitmap, scale: Int): Bitmap {
         return Bitmap.createScaledBitmap(src, src.width * scale, src.height * scale, false)
