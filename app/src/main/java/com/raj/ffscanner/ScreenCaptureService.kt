@@ -22,6 +22,8 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 import java.nio.ByteBuffer
+import java.io.File
+import java.io.FileOutputStream
 
 class ScreenCaptureService : Service() {
 
@@ -173,6 +175,17 @@ class ScreenCaptureService : Service() {
             OverlayService.addLog("Crop x=$x y=$y w=$w h=$h")
 
             val cropped = Bitmap.createBitmap(bitmap, x, y, w, h)
+
+            try {
+                val file = File(getExternalFilesDir(null), "crop_debug.png")
+                FileOutputStream(file).use { out ->
+                    cropped.compress(Bitmap.CompressFormat.PNG, 100, out)
+                }
+                OverlayService.addLog("Crop saved: ${file.absolutePath}")
+            } catch (e: Exception) {
+                OverlayService.addLog("Crop save error: ${e.message}")
+            }
+
             val inputImage = InputImage.fromBitmap(cropped, 0)
 
             recognizer.process(inputImage)
