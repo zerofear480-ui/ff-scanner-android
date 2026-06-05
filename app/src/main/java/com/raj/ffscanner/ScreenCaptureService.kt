@@ -189,8 +189,7 @@ class ScreenCaptureService : Service() {
             val killX = (cropped.width * 0.78f).toInt()
 
             val nameCrop = Bitmap.createBitmap(cropped, 0, 0, nameW, cropped.height)
-            val rawKillCrop = Bitmap.createBitmap(cropped, killX, 0, cropped.width - killX, cropped.height)
-            val killCrop = preprocessKillCrop(rawKillCrop)
+            val killCrop = Bitmap.createBitmap(cropped, killX, 0, cropped.width - killX, cropped.height)
             uploadKillCropDebug(killCrop)
 
             recognizer.process(InputImage.fromBitmap(nameCrop, 0))
