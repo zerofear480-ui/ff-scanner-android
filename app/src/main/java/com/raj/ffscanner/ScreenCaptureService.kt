@@ -211,6 +211,7 @@ class ScreenCaptureService : Service() {
                         val rowH = 100.coerceAtMost(killCrop.height - rowTop)
                         val rowCrop = Bitmap.createBitmap(killCrop, 0, rowTop, killCrop.width, rowH)
                         val bigRow = upscaleBitmap(rowCrop, 8)
+                        uploadRowDebug(i + 1, bigRow)
 
                         recognizer.process(InputImage.fromBitmap(bigRow, 0))
                             .addOnSuccessListener { r ->
@@ -384,6 +385,39 @@ class ScreenCaptureService : Service() {
 
     private fun upscaleBitmap(src: Bitmap, scale: Int): Bitmap {
         return Bitmap.createScaledBitmap(src, src.width * scale, src.height * scale, false)
+    }
+
+
+    private fun uploadRowDebug(rowId: Int, bitmap: Bitmap) {
+        try {
+            val bos = ByteArrayOutputStream()
+            bitmap.compress(Bitmap.CompressFormat.PNG, 100, bos)
+
+            val body = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart(
+                    "file",
+                    "row_$rowId.png",
+                    bos.toByteArray().toRequestBody("image/png".toMediaType())
+                )
+                .build()
+
+            val url = apiUrl.replace("/api/ocr-scan", "/api/row-debug/$rowId")
+            val req = Request.Builder().url(url).post(body).build()
+
+            client.newCall(req).enqueue(object : Callback {
+                override fun onFailure(call: Call, e: java.io.IOException) {
+                    OverlayService.addLog("Row $rowId upload failed")
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    OverlayService.addLog("Row $rowId uploaded ${response.code}")
+                    response.close()
+                }
+            })
+        } catch (e: Exception) {
+            OverlayService.addLog("Row upload error: ${e.message}")
+        }
     }
 
     private fun uploadKillCropDebug(cropped: Bitmap) {
