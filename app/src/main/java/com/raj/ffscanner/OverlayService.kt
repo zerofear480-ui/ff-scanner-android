@@ -212,7 +212,11 @@ class OverlayService : Service() {
         })
 
         startBtn.setOnClickListener {
-            addLog("Use app START OCR button first")
+            addLog("Opening app to start OCR")
+            val intent = Intent(this, MainActivity::class.java)
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            intent.putExtra("auto_start_ocr", true)
+            startActivity(intent)
         }
 
         stopBtn.setOnClickListener {

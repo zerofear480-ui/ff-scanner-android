@@ -100,6 +100,12 @@ class MainActivity : Activity() {
         layout.addView(stopBtn)
 
         setContentView(layout)
+
+        if (intent?.getBooleanExtra("auto_start_ocr", false) == true) {
+            status.text = "Status: Auto starting OCR..."
+            val manager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            startActivityForResult(manager.createScreenCaptureIntent(), requestCode)
+        }
     }
 
     override fun onActivityResult(req: Int, res: Int, data: Intent?) {
