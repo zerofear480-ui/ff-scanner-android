@@ -290,7 +290,7 @@ private fun parseStructuredScoreboard(
 
                 // Slot/group numbers: left side only
                 val slotNum = cleanNumber(raw)
-                if (slotNum != null && cx < cropW * 0.28f) {
+                if (slotNum != null && cx < cropW * 0.38f) {
                     slots.add(slotNum to cy)
                     continue
                 }
@@ -330,17 +330,17 @@ private fun parseStructuredScoreboard(
             .distinctBy { it.first.toString() + "_" + (it.second / 12) }
 
         val players = mutableListOf<PlayerData>()
-        val yLimit = maxOf(38, cropH / 28)
+        val yLimit = maxOf(55, cropH / 22)
 
         sortedNames.forEachIndexed { index, item ->
             val name = item.first
             val nameY = item.second
 
             val slot = sortedSlots
-                .lastOrNull { it.second < nameY }
+                .lastOrNull { it.second < nameY - 8 }
                 ?.first
                 ?: players.lastOrNull()?.slot
-                ?: (index + 1)
+                ?: 0
 
             val nearestKill = sortedKills.minByOrNull {
                 kotlin.math.abs(it.second - nameY)
