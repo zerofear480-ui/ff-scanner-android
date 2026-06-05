@@ -4,6 +4,7 @@ import android.app.*
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
+import android.graphics.Color
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
@@ -184,11 +185,12 @@ class ScreenCaptureService : Service() {
 
             val inputImage = InputImage.fromBitmap(cropped, 0)
 
-            val nameW = (cropped.width * 0.78f).toInt()
-            val killX = (cropped.width * 0.72f).toInt()
+            val nameW = (cropped.width * 0.74f).toInt()
+            val killX = (cropped.width * 0.62f).toInt()
 
             val nameCrop = Bitmap.createBitmap(cropped, 0, 0, nameW, cropped.height)
-            val killCrop = Bitmap.createBitmap(cropped, killX, 0, cropped.width - killX, cropped.height)
+            val rawKillCrop = Bitmap.createBitmap(cropped, killX, 0, cropped.width - killX, cropped.height)
+            val killCrop = preprocessKillCrop(rawKillCrop)
 
             recognizer.process(InputImage.fromBitmap(nameCrop, 0))
                 .addOnSuccessListener { nameResult ->
@@ -267,6 +269,27 @@ class ScreenCaptureService : Service() {
         }
 
         return names.take(20)
+    }
+
+
+    private fun preprocessKillCrop(src: Bitmap): Bitmap {
+        val out = Bitmap.createBitmap(src.width, src.height, Bitmap.Config.ARGB_8888)
+
+        for (yy in 0 until src.height) {
+            for (xx in 0 until src.width) {
+                val c = src.getPixel(xx, yy)
+                val r = Color.red(c)
+                val g = Color.green(c)
+                val b = Color.blue(c)
+
+                val gray = (r * 0.3 + g * 0.59 + b * 0.11).toInt()
+
+                val v = if (gray > 145) 255 else 0
+                out.setPixel(xx, yy, Color.rgb(v, v, v))
+            }
+        }
+
+        return out
     }
 
     private fun parseKillsOnly(text: String): List<Int> {
