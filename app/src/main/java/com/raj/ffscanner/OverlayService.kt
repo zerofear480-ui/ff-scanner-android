@@ -4,10 +4,10 @@ import android.app.Service
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.drawable.GradientDrawable
 import android.os.IBinder
 import android.view.*
 import android.widget.FrameLayout
-import android.widget.TextView
 
 class OverlayService : Service() {
 
@@ -21,26 +21,23 @@ class OverlayService : Service() {
         windowManager = getSystemService(WINDOW_SERVICE) as WindowManager
 
         box = FrameLayout(this)
-        box.setBackgroundColor(Color.argb(70, 255, 0, 0))
 
-        val label = TextView(this)
-        label.text = "OCR AREA\nDrag me"
-        label.setTextColor(Color.WHITE)
-        label.textSize = 18f
-        label.setPadding(20, 20, 20, 20)
-        box.addView(label)
+        val border = GradientDrawable()
+        border.setColor(Color.TRANSPARENT)
+        border.setStroke(6, Color.WHITE)
+        box.background = border
 
         params = WindowManager.LayoutParams(
-            500,
-            650,
+            600,
+            600,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
         )
 
         params.gravity = Gravity.TOP or Gravity.START
-        params.x = 100
-        params.y = 200
+        params.x = 120
+        params.y = 220
 
         box.setOnTouchListener(object : View.OnTouchListener {
             var startX = 0
@@ -65,6 +62,7 @@ class OverlayService : Service() {
                         return true
                     }
                 }
+
                 return false
             }
         })
@@ -76,6 +74,7 @@ class OverlayService : Service() {
         try {
             windowManager.removeView(box)
         } catch (_: Exception) {}
+
         super.onDestroy()
     }
 
