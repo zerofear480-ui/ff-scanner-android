@@ -207,10 +207,10 @@ class ScreenCaptureService : Service() {
                         }
 
                         val cy = names[i].y
-                        val rowTop = (cy - 50).coerceAtLeast(0)
-                        val rowH = 100.coerceAtMost(killCrop.height - rowTop)
+                        val rowTop = (cy - 70).coerceAtLeast(0)
+                        val rowH = 150.coerceAtMost(killCrop.height - rowTop)
                         val rowCrop = Bitmap.createBitmap(killCrop, 0, rowTop, killCrop.width, rowH)
-                        val bigRow = upscaleBitmap(rowCrop, 8)
+                        val bigRow = upscaleBitmap(rowCrop, 10)
                         uploadRowDebug(i + 1, bigRow)
 
                         recognizer.process(InputImage.fromBitmap(bigRow, 0))
