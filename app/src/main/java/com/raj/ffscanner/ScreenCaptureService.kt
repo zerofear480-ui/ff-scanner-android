@@ -169,6 +169,8 @@ class ScreenCaptureService : Service() {
                     val players = parsePlayers(result.text)
                     if (players.isNotEmpty()) {
                         sendPlayers(players)
+                    } else {
+                        sendDebugText(result.text)
                     }
                 }
         } catch (e: Exception) {
@@ -230,6 +232,8 @@ private fun sendPlayers(players: List<PlayerData>) {
 
         val root = JSONObject()
         root.put("players", arr)
+        root.put("debug", true)
+        root.put("source", "ff_scanner_app")
 
         val body = root.toString().toRequestBody("application/json".toMediaType())
 
