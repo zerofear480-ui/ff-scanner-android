@@ -186,7 +186,7 @@ class ScreenCaptureService : Service() {
             val inputImage = InputImage.fromBitmap(cropped, 0)
 
             val nameW = (cropped.width * 0.72f).toInt()
-            val killX = (cropped.width * 0.88f).toInt()
+            val killX = (cropped.width * 0.86f).toInt()
 
             val nameCrop = Bitmap.createBitmap(cropped, 0, 0, nameW, cropped.height)
             val killCrop = Bitmap.createBitmap(cropped, killX, 0, cropped.width - killX, cropped.height)
