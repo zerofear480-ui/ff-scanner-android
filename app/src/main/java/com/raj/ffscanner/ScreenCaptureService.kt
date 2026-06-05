@@ -170,7 +170,7 @@ class ScreenCaptureService : Service() {
                     if (players.isNotEmpty()) {
                         sendPlayers(players)
                     } else {
-                        sendDebugText(result.text)
+                     //   sendDebugText(result.text)
                     }
                 }
         } catch (e: Exception) {
