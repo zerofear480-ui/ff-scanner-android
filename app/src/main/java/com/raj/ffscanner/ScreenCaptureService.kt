@@ -25,6 +25,7 @@ import org.json.JSONObject
 import java.nio.ByteBuffer
 import java.io.File
 import java.io.FileOutputStream
+import java.io.ByteArrayOutputStream
 
 class ScreenCaptureService : Service() {
 
@@ -186,6 +187,8 @@ class ScreenCaptureService : Service() {
                 OverlayService.addLog("Crop save error: ${e.message}")
             }
 
+            uploadCropDebug(cropped)
+
             val inputImage = InputImage.fromBitmap(cropped, 0)
 
             recognizer.process(inputImage)
@@ -208,6 +211,39 @@ class ScreenCaptureService : Service() {
         } catch (e: Exception) {
             OverlayService.addLog("Capture error: ${e.message}")
             sendDebug("CAPTURE_ERROR: ${e.message}", 0, 0, 0, 0)
+        }
+    }
+
+
+    private fun uploadCropDebug(cropped: Bitmap) {
+        try {
+            val bos = ByteArrayOutputStream()
+            cropped.compress(Bitmap.CompressFormat.PNG, 100, bos)
+
+            val body = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart(
+                    "file",
+                    "crop_debug.png",
+                    bos.toByteArray().toRequestBody("image/png".toMediaType())
+                )
+                .build()
+
+            val url = apiUrl.replace("/api/ocr-scan", "/api/crop-debug")
+            val req = Request.Builder().url(url).post(body).build()
+
+            client.newCall(req).enqueue(object : Callback {
+                override fun onFailure(call: Call, e: java.io.IOException) {
+                    OverlayService.addLog("Crop upload failed: ${e.message}")
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    OverlayService.addLog("Crop uploaded ${response.code}")
+                    response.close()
+                }
+            })
+        } catch (e: Exception) {
+            OverlayService.addLog("Crop upload error: ${e.message}")
         }
     }
 
