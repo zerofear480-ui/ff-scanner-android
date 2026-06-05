@@ -142,7 +142,26 @@ class ScreenCaptureService : Service() {
             bitmap.copyPixelsFromBuffer(buffer)
             image.close()
 
-            val cropped = Bitmap.createBitmap(bitmap, 0, 0, image.width, image.height)
+            val prefs = getSharedPreferences("ocr_box", MODE_PRIVATE)
+
+            val savedX = prefs.getInt("x", 120)
+            val savedY = prefs.getInt("y", 220)
+            val savedW = prefs.getInt("w", 600)
+            val savedH = prefs.getInt("h", 600)
+
+            val cropX = savedX.coerceAtLeast(0).coerceAtMost(bitmap.width - 1)
+            val cropY = savedY.coerceAtLeast(0).coerceAtMost(bitmap.height - 1)
+
+            val cropW = savedW.coerceAtLeast(100).coerceAtMost(bitmap.width - cropX)
+            val cropH = savedH.coerceAtLeast(100).coerceAtMost(bitmap.height - cropY)
+
+            val cropped = Bitmap.createBitmap(
+                bitmap,
+                cropX,
+                cropY,
+                cropW,
+                cropH
+            )
             val inputImage = InputImage.fromBitmap(cropped, 0)
 
             recognizer.process(inputImage)
