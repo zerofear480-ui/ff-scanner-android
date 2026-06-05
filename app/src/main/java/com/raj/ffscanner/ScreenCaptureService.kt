@@ -40,6 +40,7 @@ class ScreenCaptureService : Service() {
     private val projectionCallback = object : MediaProjection.Callback() {
         override fun onStop() {
             running = false
+            OverlayService.addLog("Projection stopped")
         }
     }
 
@@ -73,6 +74,7 @@ class ScreenCaptureService : Service() {
             OverlayService.addLog("Permission OK, starting projection")
             startProjection(resultCode, data)
         } else {
+            OverlayService.addLog("Permission denied")
             stopSelf()
         }
 
@@ -120,9 +122,17 @@ class ScreenCaptureService : Service() {
 
     private fun captureAndOcr() {
         OverlayService.addLog("Capture tick")
+
         try {
-            val reader = imageReader ?: return
-            val image = reader.acquireLatestImage() ?: return
+            val reader = imageReader ?: run {
+                OverlayService.addLog("ImageReader null")
+                return
+            }
+
+            val image = reader.acquireLatestImage() ?: run {
+                OverlayService.addLog("No image yet")
+                return
+            }
 
             val plane = image.planes[0]
             val buffer: ByteBuffer = plane.buffer
@@ -140,12 +150,28 @@ class ScreenCaptureService : Service() {
             image.close()
 
             val prefs = getSharedPreferences("ocr_box", MODE_PRIVATE)
-            val x = prefs.getInt("x", 120).coerceAtLeast(0).coerceAtMost(bitmap.width - 1)
-            val y = prefs.getInt("y", 220).coerceAtLeast(0).coerceAtMost(bitmap.height - 1)
-            val w = prefs.getInt("w", 600).coerceAtLeast(100).coerceAtMost(bitmap.width - x)
-            val h = prefs.getInt("h", 600).coerceAtLeast(100).coerceAtMost(bitmap.height - y)
 
+            val wm = getSystemService(WINDOW_SERVICE) as WindowManager
+            val displayMetrics = DisplayMetrics()
+            @Suppress("DEPRECATION")
+            wm.defaultDisplay.getRealMetrics(displayMetrics)
+
+            val scaleX = bitmap.width.toFloat() / displayMetrics.widthPixels.toFloat()
+            val scaleY = bitmap.height.toFloat() / displayMetrics.heightPixels.toFloat()
+
+            val savedX = prefs.getInt("x", 120)
+            val savedY = prefs.getInt("y", 220)
+            val savedW = prefs.getInt("w", 600)
+            val savedH = prefs.getInt("h", 600)
+
+            val x = (savedX * scaleX).toInt().coerceAtLeast(0).coerceAtMost(bitmap.width - 1)
+            val y = (savedY * scaleY).toInt().coerceAtLeast(0).coerceAtMost(bitmap.height - 1)
+            val w = (savedW * scaleX).toInt().coerceAtLeast(100).coerceAtMost(bitmap.width - x)
+            val h = (savedH * scaleY).toInt().coerceAtLeast(100).coerceAtMost(bitmap.height - y)
+
+            OverlayService.addLog("Scale sx=$scaleX sy=$scaleY")
             OverlayService.addLog("Crop x=$x y=$y w=$w h=$h")
+
             val cropped = Bitmap.createBitmap(bitmap, x, y, w, h)
             val inputImage = InputImage.fromBitmap(cropped, 0)
 
@@ -156,11 +182,13 @@ class ScreenCaptureService : Service() {
 
                     val players = parsePlayers(result.text)
                     OverlayService.addLog("Players found=${players.size}")
+
                     if (players.isNotEmpty()) {
                         sendPlayers(players)
                     }
                 }
                 .addOnFailureListener {
+                    OverlayService.addLog("OCR error: ${it.message}")
                     sendDebug("OCR_ERROR: ${it.message}", x, y, w, h)
                 }
 
@@ -184,17 +212,25 @@ class ScreenCaptureService : Service() {
         val req = Request.Builder().url(debugUrl).post(body).build()
 
         client.newCall(req).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: java.io.IOException) { OverlayService.addLog("Send failed: ${e.message}") }
-            override fun onResponse(call: Call, response: Response) { OverlayService.addLog("Debug sent ${response.code}"); response.close() }
+            override fun onFailure(call: Call, e: java.io.IOException) {
+                OverlayService.addLog("Debug send failed: ${e.message}")
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                OverlayService.addLog("Debug sent ${response.code}")
+                response.close()
+            }
         })
     }
 
-    
-private fun parsePlayers(text: String): List<PlayerData> {
+    private fun parsePlayers(text: String): List<PlayerData> {
         val players = mutableListOf<PlayerData>()
         var slot = 1
 
-        val ignore = listOf("players", "safe", "zone", "bermuda", "game", "hp", "ep")
+        val ignore = listOf(
+            "players", "safe", "zone", "bermuda", "game", "hp", "ep",
+            "alive", "spectating"
+        )
 
         text.lines().forEach { raw ->
             var line = raw.trim()
@@ -228,8 +264,9 @@ private fun parsePlayers(text: String): List<PlayerData> {
         return players.take(20)
     }
 
-private fun sendPlayers(players: List<PlayerData>) {
+    private fun sendPlayers(players: List<PlayerData>) {
         val arr = JSONArray()
+
         players.forEach {
             val obj = JSONObject()
             obj.put("slot", it.slot)
@@ -245,14 +282,24 @@ private fun sendPlayers(players: List<PlayerData>) {
         val req = Request.Builder().url(apiUrl).post(body).build()
 
         client.newCall(req).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: java.io.IOException) {}
-            override fun onResponse(call: Call, response: Response) { response.close() }
+            override fun onFailure(call: Call, e: java.io.IOException) {
+                OverlayService.addLog("Players send failed: ${e.message}")
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                OverlayService.addLog("Players sent ${response.code}")
+                response.close()
+            }
         })
     }
 
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(channelId, "FF Scanner", NotificationManager.IMPORTANCE_LOW)
+            val channel = NotificationChannel(
+                channelId,
+                "FF Scanner",
+                NotificationManager.IMPORTANCE_LOW
+            )
             getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
     }
@@ -281,6 +328,7 @@ private fun sendPlayers(players: List<PlayerData>) {
         try { imageReader?.close() } catch (_: Exception) {}
         try { projection?.unregisterCallback(projectionCallback) } catch (_: Exception) {}
         try { projection?.stop() } catch (_: Exception) {}
+        OverlayService.addLog("Service destroyed")
         super.onDestroy()
     }
 
