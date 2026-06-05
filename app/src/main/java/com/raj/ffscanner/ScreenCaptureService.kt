@@ -183,48 +183,60 @@ class ScreenCaptureService : Service() {
 
             uploadCropDebug(cropped)
 
-            val inputImage = InputImage.fromBitmap(cropped, 0)
-
-            val nameW = (cropped.width * 0.72f).toInt()
+            val slotW = (cropped.width * 0.14f).toInt()
+            val nameX = slotW
+            val nameW = (cropped.width * 0.62f).toInt()
             val killX = (cropped.width * 0.86f).toInt()
 
-            val nameCrop = Bitmap.createBitmap(cropped, 0, 0, nameW, cropped.height)
+            val slotCrop = Bitmap.createBitmap(cropped, 0, 0, slotW, cropped.height)
+            val nameCrop = Bitmap.createBitmap(cropped, nameX, 0, nameW, cropped.height)
             val killCrop = Bitmap.createBitmap(cropped, killX, 0, cropped.width - killX, cropped.height)
+
             uploadKillCropDebug(killCrop)
 
-            recognizer.process(InputImage.fromBitmap(nameCrop, 0))
-                .addOnSuccessListener { nameResult ->
-                    recognizer.process(InputImage.fromBitmap(killCrop, 0))
-                        .addOnSuccessListener { killResult ->
+            recognizer.process(InputImage.fromBitmap(slotCrop, 0))
+                .addOnSuccessListener { slotResult ->
+                    recognizer.process(InputImage.fromBitmap(nameCrop, 0))
+                        .addOnSuccessListener { nameResult ->
+                            recognizer.process(InputImage.fromBitmap(killCrop, 0))
+                                .addOnSuccessListener { killResult ->
 
-                            val names = parseNamesOnly(nameResult.text)
-                            val kills = parseKillsOnly(killResult.text)
+                                    val slotHeaders = parseSlotHeaders(slotResult.text)
+                                    val names = parseNamesOnly(nameResult.text)
+                                    val kills = parseKillsOnly(killResult.text)
 
-                            val players = mutableListOf<PlayerData>()
+                                    val players = mutableListOf<PlayerData>()
 
-                            names.forEachIndexed { index, name ->
-                                val kill = kills.getOrNull(index) ?: 0
-                                players.add(PlayerData(index + 1, name, kill))
-                            }
+                                    var currentSlot = slotHeaders.firstOrNull() ?: 1
+                                    names.forEachIndexed { index, name ->
+                                        if (index >= 4 && slotHeaders.size >= 2) currentSlot = slotHeaders[1]
+                                        if (index >= 8 && slotHeaders.size >= 3) currentSlot = slotHeaders[2]
 
-                            OverlayService.addLog("Simple players=${players.size}")
-                            OverlayService.addLog("Kill OCR=${kills.joinToString(",")}")
+                                        val kill = kills.getOrNull(index) ?: 0
+                                        players.add(PlayerData(currentSlot, name, kill))
+                                    }
 
-                            sendDebug(
-                                "NAMES:\\n${nameResult.text}\\n\\nKILLS:\\n${killResult.text}",
-                                x, y, w, h
-                            )
+                                    OverlayService.addLog("Structured players=${players.size}")
+                                    OverlayService.addLog("Slots=${slotHeaders.joinToString(",")}")
+                                    OverlayService.addLog("Kills=${kills.joinToString(",")}")
 
-                            if (players.isNotEmpty()) {
-                                sendPlayers(players)
-                            }
+                                    sendDebug(
+                                        "SLOTS:\\n${slotResult.text}\\n\\nNAMES:\\n${nameResult.text}\\n\\nKILLS:\\n${killResult.text}",
+                                        x, y, w, h
+                                    )
+
+                                    if (players.isNotEmpty()) sendPlayers(players)
+                                }
+                                .addOnFailureListener {
+                                    OverlayService.addLog("Kill OCR error: ${it.message}")
+                                }
                         }
                         .addOnFailureListener {
-                            OverlayService.addLog("Kill OCR error: ${it.message}")
+                            OverlayService.addLog("Name OCR error: ${it.message}")
                         }
                 }
                 .addOnFailureListener {
-                    OverlayService.addLog("Name OCR error: ${it.message}")
+                    OverlayService.addLog("Slot OCR error: ${it.message}")
                 }
 
         } catch (e: Exception) {
@@ -233,7 +245,22 @@ class ScreenCaptureService : Service() {
         }
     }
 
-    private fun parseNamesOnly(text: String): List<String> {
+    private fun parseSlotHeaders(text: String): List<Int> {
+        return text.lines().mapNotNull { line ->
+            val cleaned = line.trim()
+                .replace("O", "0")
+                .replace("o", "0")
+                .replace(Regex("""[^0-9]"""), "")
+
+            if (cleaned.matches(Regex("""^\d{1,2}$"""))) {
+                cleaned.toIntOrNull()
+            } else {
+                null
+            }
+        }.take(10)
+    }
+
+private fun parseNamesOnly(text: String): List<String> {
         val names = mutableListOf<String>()
 
         val ignore = listOf(
