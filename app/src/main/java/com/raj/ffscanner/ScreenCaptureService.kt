@@ -176,27 +176,48 @@ class ScreenCaptureService : Service() {
         }
     }
 
-    private fun parsePlayers(text: String): List<PlayerData> {
+    
+private fun parsePlayers(text: String): List<PlayerData> {
         val players = mutableListOf<PlayerData>()
-        val regex = Regex("""^\s*(\d{1,2})\s+(.+?)\s+(\d{1,2})\s*$""")
 
-        text.lines().forEach { line ->
-            val m = regex.find(line.trim())
+        val ignoreWords = listOf(
+            "players", "safe zone", "bermuda", "game", "hp", "ep",
+            "alive", "kill", "team", "spectating"
+        )
+
+        var slot = 1
+
+        text.lines().forEach { raw ->
+            val line = raw.trim()
+                .replace("|", " ")
+                .replace("  ", " ")
+
+            if (line.length < 3) return@forEach
+
+            val lower = line.lowercase()
+            if (ignoreWords.any { lower.contains(it) }) return@forEach
+
+            val m = Regex("""^(.+?)\s+(\d{1,2})$""").find(line)
+
             if (m != null) {
-                val slot = m.groupValues[1].toIntOrNull() ?: return@forEach
-                val name = m.groupValues[2].trim()
-                val kills = m.groupValues[3].toIntOrNull() ?: 0
+                var name = m.groupValues[1].trim()
+                val kills = m.groupValues[2].toIntOrNull() ?: return@forEach
 
-                if (slot in 1..50) {
+                name = name
+                    .replace(Regex("""[^A-Za-z0-9_ .!'₹-]"""), "")
+                    .trim()
+
+                if (name.length >= 2 && kills in 0..99) {
                     players.add(PlayerData(slot, name, kills))
+                    slot++
                 }
             }
         }
 
-        return players
+        return players.take(20)
     }
 
-    private fun sendPlayers(players: List<PlayerData>) {
+private fun sendPlayers(players: List<PlayerData>) {
         val arr = JSONArray()
 
         players.forEach {
