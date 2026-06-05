@@ -6,6 +6,7 @@ import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
+import android.hardware.display.VirtualDisplay
 import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
@@ -32,8 +33,15 @@ class ScreenCaptureService : Service() {
 
     private var projection: MediaProjection? = null
     private var imageReader: ImageReader? = null
+    private var virtualDisplay: VirtualDisplay? = null
     private var running = false
     private var apiUrl = "http://13.204.87.106:8000/api/ocr-scan"
+
+    private val projectionCallback = object : MediaProjection.Callback() {
+        override fun onStop() {
+            running = false
+        }
+    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         apiUrl = intent?.getStringExtra("apiUrl") ?: apiUrl
@@ -42,12 +50,17 @@ class ScreenCaptureService : Service() {
         val notification = buildNotification()
 
         if (Build.VERSION.SDK_INT >= 29) {
-            startForeground(notificationId, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
+            startForeground(
+                notificationId,
+                notification,
+                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
+            )
         } else {
             startForeground(notificationId, notification)
         }
 
-        val resultCode = intent?.getIntExtra("resultCode", Activity.RESULT_CANCELED) ?: Activity.RESULT_CANCELED
+        val resultCode = intent?.getIntExtra("resultCode", Activity.RESULT_CANCELED)
+            ?: Activity.RESULT_CANCELED
 
         val data = if (Build.VERSION.SDK_INT >= 33) {
             intent?.getParcelableExtra("data", Intent::class.java)
@@ -57,6 +70,7 @@ class ScreenCaptureService : Service() {
         }
 
         if (resultCode == Activity.RESULT_OK && data != null) {
+            OverlayService.addLog("Permission OK, starting projection")
             startProjection(resultCode, data)
         } else {
             stopSelf()
@@ -68,6 +82,7 @@ class ScreenCaptureService : Service() {
     private fun startProjection(resultCode: Int, data: Intent) {
         val manager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         projection = manager.getMediaProjection(resultCode, data)
+        projection?.registerCallback(projectionCallback, handler)
 
         val wm = getSystemService(WINDOW_SERVICE) as WindowManager
         val metrics = DisplayMetrics()
@@ -81,7 +96,7 @@ class ScreenCaptureService : Service() {
             2
         )
 
-        projection?.createVirtualDisplay(
+        virtualDisplay = projection?.createVirtualDisplay(
             "FFScannerDisplay",
             metrics.widthPixels,
             metrics.heightPixels,
@@ -92,6 +107,7 @@ class ScreenCaptureService : Service() {
             handler
         )
 
+        OverlayService.addLog("Projection created")
         running = true
         scanLoop()
     }
@@ -103,6 +119,7 @@ class ScreenCaptureService : Service() {
     }
 
     private fun captureAndOcr() {
+        OverlayService.addLog("Capture tick")
         try {
             val reader = imageReader ?: return
             val image = reader.acquireLatestImage() ?: return
@@ -128,20 +145,29 @@ class ScreenCaptureService : Service() {
             val w = prefs.getInt("w", 600).coerceAtLeast(100).coerceAtMost(bitmap.width - x)
             val h = prefs.getInt("h", 600).coerceAtLeast(100).coerceAtMost(bitmap.height - y)
 
+            OverlayService.addLog("Crop x=$x y=$y w=$w h=$h")
             val cropped = Bitmap.createBitmap(bitmap, x, y, w, h)
             val inputImage = InputImage.fromBitmap(cropped, 0)
 
             recognizer.process(inputImage)
                 .addOnSuccessListener { result ->
+                    OverlayService.addLog("OCR length=${result.text.length}")
                     sendDebug(result.text, x, y, w, h)
 
                     val players = parsePlayers(result.text)
+                    OverlayService.addLog("Players found=${players.size}")
                     if (players.isNotEmpty()) {
                         sendPlayers(players)
                     }
                 }
+                .addOnFailureListener {
+                    sendDebug("OCR_ERROR: ${it.message}", x, y, w, h)
+                }
 
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+            OverlayService.addLog("Capture error: ${e.message}")
+            sendDebug("CAPTURE_ERROR: ${e.message}", 0, 0, 0, 0)
+        }
     }
 
     private fun sendDebug(text: String, x: Int, y: Int, w: Int, h: Int) {
@@ -155,11 +181,11 @@ class ScreenCaptureService : Service() {
 
         val debugUrl = apiUrl.replace("/api/ocr-scan", "/api/ocr-debug")
         val body = root.toString().toRequestBody("application/json".toMediaType())
-
         val req = Request.Builder().url(debugUrl).post(body).build()
+
         client.newCall(req).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: java.io.IOException) {}
-            override fun onResponse(call: Call, response: Response) { response.close() }
+            override fun onFailure(call: Call, e: java.io.IOException) { OverlayService.addLog("Send failed: ${e.message}") }
+            override fun onResponse(call: Call, response: Response) { OverlayService.addLog("Debug sent ${response.code}"); response.close() }
         })
     }
 
@@ -170,24 +196,20 @@ class ScreenCaptureService : Service() {
         text.lines().forEach { raw ->
             val line = raw.trim().replace("|", " ")
             val m = Regex("""^(.+?)\s+(\d{1,2})$""").find(line)
-
             if (m != null) {
                 val name = m.groupValues[1].trim()
                 val kills = m.groupValues[2].toIntOrNull() ?: return@forEach
-
                 if (name.length >= 2 && kills in 0..99) {
                     players.add(PlayerData(slot, name, kills))
                     slot++
                 }
             }
         }
-
         return players.take(20)
     }
 
     private fun sendPlayers(players: List<PlayerData>) {
         val arr = JSONArray()
-
         players.forEach {
             val obj = JSONObject()
             obj.put("slot", it.slot)
@@ -235,8 +257,10 @@ class ScreenCaptureService : Service() {
 
     override fun onDestroy() {
         running = false
-        imageReader?.close()
-        projection?.stop()
+        try { virtualDisplay?.release() } catch (_: Exception) {}
+        try { imageReader?.close() } catch (_: Exception) {}
+        try { projection?.unregisterCallback(projectionCallback) } catch (_: Exception) {}
+        try { projection?.stop() } catch (_: Exception) {}
         super.onDestroy()
     }
 
