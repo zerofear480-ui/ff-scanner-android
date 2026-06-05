@@ -183,60 +183,35 @@ class ScreenCaptureService : Service() {
 
             uploadCropDebug(cropped)
 
-            val slotW = (cropped.width * 0.14f).toInt()
-            val nameX = slotW
-            val nameW = (cropped.width * 0.62f).toInt()
+            val fullImage = InputImage.fromBitmap(cropped, 0)
+
             val killX = (cropped.width * 0.86f).toInt()
-
-            val slotCrop = Bitmap.createBitmap(cropped, 0, 0, slotW, cropped.height)
-            val nameCrop = Bitmap.createBitmap(cropped, nameX, 0, nameW, cropped.height)
             val killCrop = Bitmap.createBitmap(cropped, killX, 0, cropped.width - killX, cropped.height)
-
             uploadKillCropDebug(killCrop)
 
-            recognizer.process(InputImage.fromBitmap(slotCrop, 0))
-                .addOnSuccessListener { slotResult ->
-                    recognizer.process(InputImage.fromBitmap(nameCrop, 0))
-                        .addOnSuccessListener { nameResult ->
-                            recognizer.process(InputImage.fromBitmap(killCrop, 0))
-                                .addOnSuccessListener { killResult ->
+            recognizer.process(fullImage)
+                .addOnSuccessListener { result ->
+                    val players = parseStructuredScoreboard(result, cropped.width, cropped.height)
 
-                                    val slotHeaders = parseSlotHeaders(slotResult.text)
-                                    val names = parseNamesOnly(nameResult.text)
-                                    val kills = parseKillsOnly(killResult.text)
+                    OverlayService.addLog("Structured players=${players.size}")
 
-                                    val players = mutableListOf<PlayerData>()
+                    if (players.isNotEmpty()) {
+                        val slotLog = players.map { it.slot }.distinct().joinToString(",")
+                        val killLog = players.joinToString(",") { it.kills.toString() }
+                        OverlayService.addLog("Slots=$slotLog")
+                        OverlayService.addLog("Kills=$killLog")
+                        sendPlayers(players)
+                    } else {
+                        OverlayService.addLog("No structured players")
+                    }
 
-                                    var currentSlot = slotHeaders.firstOrNull() ?: 1
-                                    names.forEachIndexed { index, name ->
-                                        if (index >= 4 && slotHeaders.size >= 2) currentSlot = slotHeaders[1]
-                                        if (index >= 8 && slotHeaders.size >= 3) currentSlot = slotHeaders[2]
-
-                                        val kill = kills.getOrNull(index) ?: 0
-                                        players.add(PlayerData(currentSlot, name, kill))
-                                    }
-
-                                    OverlayService.addLog("Structured players=${players.size}")
-                                    OverlayService.addLog("Slots=${slotHeaders.joinToString(",")}")
-                                    OverlayService.addLog("Kills=${kills.joinToString(",")}")
-
-                                    sendDebug(
-                                        "SLOTS:\\n${slotResult.text}\\n\\nNAMES:\\n${nameResult.text}\\n\\nKILLS:\\n${killResult.text}",
-                                        x, y, w, h
-                                    )
-
-                                    if (players.isNotEmpty()) sendPlayers(players)
-                                }
-                                .addOnFailureListener {
-                                    OverlayService.addLog("Kill OCR error: ${it.message}")
-                                }
-                        }
-                        .addOnFailureListener {
-                            OverlayService.addLog("Name OCR error: ${it.message}")
-                        }
+                    sendDebug(
+                        "FULL OCR:\\n${result.text}",
+                        x, y, w, h
+                    )
                 }
                 .addOnFailureListener {
-                    OverlayService.addLog("Slot OCR error: ${it.message}")
+                    OverlayService.addLog("OCR error: ${it.message}")
                 }
 
         } catch (e: Exception) {
@@ -258,6 +233,132 @@ class ScreenCaptureService : Service() {
                 null
             }
         }.take(10)
+    }
+
+private fun parseStructuredScoreboard(
+        result: com.google.mlkit.vision.text.Text,
+        cropW: Int,
+        cropH: Int
+    ): List<PlayerData> {
+        val ignore = listOf(
+            "players", "safe", "zone", "bermuda", "game", "hp", "ep",
+            "alive", "spectating", "permission", "projection", "starting",
+            "debug", "sent", "capture", "crop", "scale", "ocr", "length",
+            "booyah", "paid", "app", "ok", "final", "round", "service",
+            "destroyed", "stopped", "tick"
+        )
+
+        val slots = mutableListOf<Pair<Int, Int>>()   // value, y
+        val names = mutableListOf<Pair<String, Int>>() // name, y
+        val kills = mutableListOf<Pair<Int, Int>>()   // value, y
+
+        fun cleanNumber(raw: String): Int? {
+            val cleaned = raw.trim()
+                .replace("O", "0")
+                .replace("o", "0")
+                .replace("I", "1")
+                .replace("l", "1")
+                .replace("|", "1")
+                .replace(Regex("""[^0-9]"""), "")
+
+            if (!cleaned.matches(Regex("""^\d{1,2}$"""))) return null
+            val n = cleaned.toIntOrNull() ?: return null
+            return if (n in 0..99) n else null
+        }
+
+        fun cleanName(raw: String): String {
+            return raw.trim()
+                .replace("|", " ")
+                .replace(">", "")
+                .replace(")", "")
+                .replace("(", "")
+                .replace(Regex("""\s+"""), " ")
+                .replace(Regex("""[^A-Za-z0-9_ .!'₹-]"""), "")
+                .trim()
+        }
+
+        for (block in result.textBlocks) {
+            for (line in block.lines) {
+                val box = line.boundingBox ?: continue
+                val cx = box.centerX()
+                val cy = box.centerY()
+                val raw = line.text.trim()
+                val lower = raw.lowercase()
+
+                if (raw.isBlank()) continue
+                if (ignore.any { lower.contains(it) }) continue
+
+                // Slot/group numbers: left side only
+                val slotNum = cleanNumber(raw)
+                if (slotNum != null && cx < cropW * 0.28f) {
+                    slots.add(slotNum to cy)
+                    continue
+                }
+
+                // Kill numbers: right side only, use elements for accurate x/y
+                for (el in line.elements) {
+                    val eb = el.boundingBox ?: continue
+                    if (eb.centerX() > cropW * 0.84f) {
+                        val n = cleanNumber(el.text)
+                        if (n != null) {
+                            kills.add(n to eb.centerY())
+                        }
+                    }
+                }
+
+                // Player name: middle/left text lines with letters
+                val name = cleanName(raw)
+                if (
+                    name.length >= 3 &&
+                    name.any { it.isLetter() } &&
+                    cx < cropW * 0.82f &&
+                    !name.all { it.isDigit() }
+                ) {
+                    names.add(name to cy)
+                }
+            }
+        }
+
+        val sortedSlots = slots.sortedBy { it.second }
+        val sortedNames = names
+            .sortedBy { it.second }
+            .distinctBy { it.first + "_" + (it.second / 12) }
+            .take(20)
+
+        val sortedKills = kills
+            .sortedBy { it.second }
+            .distinctBy { it.first.toString() + "_" + (it.second / 12) }
+
+        val players = mutableListOf<PlayerData>()
+        val yLimit = maxOf(38, cropH / 28)
+
+        sortedNames.forEachIndexed { index, item ->
+            val name = item.first
+            val nameY = item.second
+
+            val slot = sortedSlots
+                .lastOrNull { it.second < nameY }
+                ?.first
+                ?: players.lastOrNull()?.slot
+                ?: (index + 1)
+
+            val nearestKill = sortedKills.minByOrNull {
+                kotlin.math.abs(it.second - nameY)
+            }
+
+            val kill = if (
+                nearestKill != null &&
+                kotlin.math.abs(nearestKill.second - nameY) <= yLimit
+            ) {
+                nearestKill.first
+            } else {
+                0
+            }
+
+            players.add(PlayerData(slot, name, kill))
+        }
+
+        return players.take(20)
     }
 
 private fun parseNamesOnly(text: String): List<String> {
