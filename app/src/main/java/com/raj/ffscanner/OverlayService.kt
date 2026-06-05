@@ -240,20 +240,28 @@ class OverlayService : Service() {
     }
 
     private fun saveBox() {
+        val loc = IntArray(2)
+        box.getLocationOnScreen(loc)
+
         val metrics = android.util.DisplayMetrics()
         @Suppress("DEPRECATION")
         wm.defaultDisplay.getRealMetrics(metrics)
 
+        val realX = loc[0]
+        val realY = loc[1]
+        val realW = box.width
+        val realH = box.height
+
         getSharedPreferences("ocr_box", MODE_PRIVATE).edit()
-            .putInt("x", boxParams.x)
-            .putInt("y", boxParams.y)
-            .putInt("w", boxParams.width)
-            .putInt("h", boxParams.height)
+            .putInt("x", realX)
+            .putInt("y", realY)
+            .putInt("w", realW)
+            .putInt("h", realH)
             .putInt("screen_w", metrics.widthPixels)
             .putInt("screen_h", metrics.heightPixels)
             .apply()
 
-        addLog("Box exact saved x=${boxParams.x} y=${boxParams.y} w=${boxParams.width} h=${boxParams.height} sw=${metrics.widthPixels} sh=${metrics.heightPixels}")
+        addLog("Box exact saved x=$realX y=$realY w=$realW h=$realH sw=${metrics.widthPixels} sh=${metrics.heightPixels}")
     }
 
     override fun onDestroy() {

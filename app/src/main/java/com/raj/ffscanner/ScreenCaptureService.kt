@@ -166,16 +166,13 @@ class ScreenCaptureService : Service() {
             val savedW = prefs.getInt("w", 600)
             val savedH = prefs.getInt("h", 600)
 
-            val offsetX = -80
-            val offsetY = 0
-            val offsetW = 350
-            val offsetH = 0
+            val x = (savedX * scaleX).toInt().coerceAtLeast(0).coerceAtMost(bitmap.width - 1)
+            val y = (savedY * scaleY).toInt().coerceAtLeast(0).coerceAtMost(bitmap.height - 1)
+            val w = (savedW * scaleX).toInt().coerceAtLeast(100).coerceAtMost(bitmap.width - x)
+            val h = (savedH * scaleY).toInt().coerceAtLeast(100).coerceAtMost(bitmap.height - y)
 
-            val x = ((savedX * scaleX).toInt() + offsetX).coerceAtLeast(0).coerceAtMost(bitmap.width - 1)
-            val y = ((savedY * scaleY).toInt() + offsetY).coerceAtLeast(0).coerceAtMost(bitmap.height - 1)
-            val w = ((savedW * scaleX).toInt() + offsetW).coerceAtLeast(100).coerceAtMost(bitmap.width - x)
-            val h = ((savedH * scaleY).toInt() + offsetH).coerceAtLeast(100).coerceAtMost(bitmap.height - y)
-
+            OverlayService.addLog("Saved box x=$savedX y=$savedY w=$savedW h=$savedH")
+            OverlayService.addLog("Bitmap ${bitmap.width}x${bitmap.height} savedScreen ${savedScreenW}x${savedScreenH}")
             OverlayService.addLog("Scale sx=$scaleX sy=$scaleY")
             OverlayService.addLog("Crop x=$x y=$y w=$w h=$h")
 
