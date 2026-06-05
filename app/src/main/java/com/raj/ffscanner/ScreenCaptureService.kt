@@ -194,43 +194,35 @@ class ScreenCaptureService : Service() {
 
             recognizer.process(InputImage.fromBitmap(nameCrop, 0))
                 .addOnSuccessListener { nameResult ->
-                    val namesOnly = parseNamesOnly(nameResult.text)
-                    OverlayService.addLog("Name OCR length=${nameResult.text.length}")
+                    recognizer.process(InputImage.fromBitmap(killCrop, 0))
+                        .addOnSuccessListener { killResult ->
 
-                    val players = mutableListOf<PlayerData>()
-                    val rowH = killCrop.height / namesOnly.size.coerceAtLeast(1)
+                            val names = extractNamesWithY(nameResult)
+                            val kills = extractKillsWithY(killResult)
 
-                    fun readKillRow(index: Int) {
-                        if (index >= namesOnly.size) {
-                            sendDebug("NAMES:\\n${nameResult.text}\\n\\nROW OCR DONE", x, y, w, h)
-                            OverlayService.addLog("Row-wise players=${players.size}")
-                            if (players.isNotEmpty()) sendPlayers(players)
-                            return
+                            val players = mutableListOf<PlayerData>()
+
+                            names.forEachIndexed { index, item ->
+                                val nearest = kills.minByOrNull { kotlin.math.abs(it.y - item.y) }
+                                val kill = if (nearest != null && kotlin.math.abs(nearest.y - item.y) < 45) nearest.value else 0
+                                players.add(PlayerData(index + 1, item.name, kill))
+                            }
+
+                            OverlayService.addLog("Mapped players=${players.size}")
+                            OverlayService.addLog("Kill OCR text=${killResult.text.take(80)}")
+
+                            sendDebug(
+                                "NAMES:\\n${nameResult.text}\\n\\nKILLS:\\n${killResult.text}",
+                                x, y, w, h
+                            )
+
+                            if (players.isNotEmpty()) {
+                                sendPlayers(players)
+                            }
                         }
-
-                        val rowY = (index * rowH).coerceAtLeast(0).coerceAtMost(killCrop.height - 1)
-                        val safeH = rowH.coerceAtLeast(25).coerceAtMost(killCrop.height - rowY)
-
-                        val rowCrop = Bitmap.createBitmap(killCrop, 0, rowY, killCrop.width, safeH)
-
-                        recognizer.process(InputImage.fromBitmap(rowCrop, 0))
-                            .addOnSuccessListener { rowResult ->
-                                val nums = parseKillsOnly(rowResult.text)
-                                val kill = nums.firstOrNull() ?: 0
-
-                                OverlayService.addLog("Row ${index + 1}: ${namesOnly[index]} = $kill")
-
-                                players.add(PlayerData(index + 1, namesOnly[index], kill))
-                                readKillRow(index + 1)
-                            }
-                            .addOnFailureListener {
-                                OverlayService.addLog("Row ${index + 1} kill OCR fail")
-                                players.add(PlayerData(index + 1, namesOnly[index], 0))
-                                readKillRow(index + 1)
-                            }
-                    }
-
-                    readKillRow(0)
+                        .addOnFailureListener {
+                            OverlayService.addLog("Kill OCR error: ${it.message}")
+                        }
                 }
                 .addOnFailureListener {
                     OverlayService.addLog("Name OCR error: ${it.message}")
@@ -312,6 +304,57 @@ class ScreenCaptureService : Service() {
         return nums.take(20)
     }
 
+
+
+    data class NameY(val name: String, val y: Int)
+    data class KillY(val value: Int, val y: Int)
+
+    private fun extractNamesWithY(result: com.google.mlkit.vision.text.Text): List<NameY> {
+        val list = mutableListOf<NameY>()
+        val ignore = listOf("players", "bermuda", "game", "safe", "zone", "hp", "ep")
+
+        for (block in result.textBlocks) {
+            for (line in block.lines) {
+                var text = line.text.trim()
+                    .replace("|", " ")
+                    .replace(">", "")
+                    .replace(")", "")
+                    .replace("(", "")
+                    .replace(Regex("""\s+"""), " ")
+
+                if (text.length < 3) continue
+                if (text.all { it.isDigit() }) continue
+
+                val lower = text.lowercase()
+                if (ignore.any { lower.contains(it) }) continue
+
+                text = text.replace(Regex("""[^A-Za-z0-9_ .!'₹-]"""), "").trim()
+                if (text.length < 3) continue
+
+                val y = line.boundingBox?.centerY() ?: continue
+                list.add(NameY(text, y))
+            }
+        }
+
+        return list.take(20)
+    }
+
+    private fun extractKillsWithY(result: com.google.mlkit.vision.text.Text): List<KillY> {
+        val list = mutableListOf<KillY>()
+
+        for (block in result.textBlocks) {
+            for (line in block.lines) {
+                val y = line.boundingBox?.centerY() ?: continue
+                Regex("""\b\d{1,2}\b""").findAll(line.text).forEach { m ->
+                    val raw = m.value
+                    val value = if (raw.length > 1 && raw.startsWith("0")) 0 else (raw.toIntOrNull() ?: 0)
+                    if (value in 0..99) list.add(KillY(value, y))
+                }
+            }
+        }
+
+        return list
+    }
 
     private fun uploadKillCropDebug(cropped: Bitmap) {
         try {
