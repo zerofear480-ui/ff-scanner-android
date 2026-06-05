@@ -178,15 +178,12 @@ class ScreenCaptureService : Service() {
             val cropped = Bitmap.createBitmap(bitmap, x, y, w, h)
 
             try {
-                val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
-                if (!dir.exists()) dir.mkdirs()
-
-                val file = File(dir, "crop_debug.png")
+                val file = File(getExternalFilesDir(null), "crop_debug.png")
                 FileOutputStream(file).use { out ->
                     cropped.compress(Bitmap.CompressFormat.PNG, 100, out)
                 }
 
-                OverlayService.addLog("Crop saved: Pictures/crop_debug.png")
+                OverlayService.addLog("Crop saved: app files/crop_debug.png")
             } catch (e: Exception) {
                 OverlayService.addLog("Crop save error: ${e.message}")
             }
