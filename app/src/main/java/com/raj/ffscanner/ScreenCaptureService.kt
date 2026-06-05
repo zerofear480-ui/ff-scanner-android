@@ -648,3 +648,13 @@ private fun sendPlayers(players: List<PlayerData>) {
 
     data class PlayerData(val slot: Int, val name: String, val kills: Int)
 }
+
+data class NameY(
+    val name: String,
+    val y: Int
+)
+
+data class KillY(
+    val kills: Int,
+    val y: Int
+)
