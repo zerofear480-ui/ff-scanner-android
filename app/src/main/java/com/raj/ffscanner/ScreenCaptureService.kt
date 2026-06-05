@@ -154,28 +154,21 @@ class ScreenCaptureService : Service() {
 
             val prefs = getSharedPreferences("ocr_box", MODE_PRIVATE)
 
-            val wm = getSystemService(WINDOW_SERVICE) as WindowManager
-            val displayMetrics = DisplayMetrics()
-            @Suppress("DEPRECATION")
-            wm.defaultDisplay.getRealMetrics(displayMetrics)
+            val savedScreenW = prefs.getInt("screen_w", bitmap.width)
+            val savedScreenH = prefs.getInt("screen_h", bitmap.height)
 
-            val scaleX = bitmap.width.toFloat() / displayMetrics.widthPixels.toFloat()
-            val scaleY = bitmap.height.toFloat() / displayMetrics.heightPixels.toFloat()
+            val scaleX = bitmap.width.toFloat() / savedScreenW.toFloat()
+            val scaleY = bitmap.height.toFloat() / savedScreenH.toFloat()
 
             val savedX = prefs.getInt("x", 120)
             val savedY = prefs.getInt("y", 220)
             val savedW = prefs.getInt("w", 600)
             val savedH = prefs.getInt("h", 600)
 
-            val offsetX = 0
-            val offsetY = 0
-            val offsetW = 160
-            val offsetH = 0
-
-            val x = ((savedX * scaleX).toInt() + offsetX).coerceAtLeast(0).coerceAtMost(bitmap.width - 1)
-            val y = ((savedY * scaleY).toInt() + offsetY).coerceAtLeast(0).coerceAtMost(bitmap.height - 1)
-            val w = ((savedW * scaleX).toInt() + offsetW).coerceAtLeast(100).coerceAtMost(bitmap.width - x)
-            val h = ((savedH * scaleY).toInt() + offsetH).coerceAtLeast(100).coerceAtMost(bitmap.height - y)
+            val x = (savedX * scaleX).toInt().coerceAtLeast(0).coerceAtMost(bitmap.width - 1)
+            val y = (savedY * scaleY).toInt().coerceAtLeast(0).coerceAtMost(bitmap.height - 1)
+            val w = (savedW * scaleX).toInt().coerceAtLeast(100).coerceAtMost(bitmap.width - x)
+            val h = (savedH * scaleY).toInt().coerceAtLeast(100).coerceAtMost(bitmap.height - y)
 
             OverlayService.addLog("Scale sx=$scaleX sy=$scaleY")
             OverlayService.addLog("Crop x=$x y=$y w=$w h=$h")
