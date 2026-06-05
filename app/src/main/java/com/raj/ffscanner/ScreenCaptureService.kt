@@ -189,26 +189,46 @@ class ScreenCaptureService : Service() {
         })
     }
 
-    private fun parsePlayers(text: String): List<PlayerData> {
+    
+private fun parsePlayers(text: String): List<PlayerData> {
         val players = mutableListOf<PlayerData>()
         var slot = 1
 
+        val ignore = listOf("players", "safe", "zone", "bermuda", "game", "hp", "ep")
+
         text.lines().forEach { raw ->
-            val line = raw.trim().replace("|", " ")
+            var line = raw.trim()
+                .replace("|", " ")
+                .replace(">", "")
+                .replace(")", "")
+                .replace("  ", " ")
+
+            if (line.length < 3) return@forEach
+            if (line.all { it.isDigit() }) return@forEach
+
+            val lower = line.lowercase()
+            if (ignore.any { lower.contains(it) }) return@forEach
+
+            var kills = 0
             val m = Regex("""^(.+?)\s+(\d{1,2})$""").find(line)
+
             if (m != null) {
-                val name = m.groupValues[1].trim()
-                val kills = m.groupValues[2].toIntOrNull() ?: return@forEach
-                if (name.length >= 2 && kills in 0..99) {
-                    players.add(PlayerData(slot, name, kills))
-                    slot++
-                }
+                line = m.groupValues[1].trim()
+                kills = m.groupValues[2].toIntOrNull() ?: 0
+            }
+
+            line = line.replace(Regex("""[^A-Za-z0-9_ .!'₹-]"""), "").trim()
+
+            if (line.length >= 2) {
+                players.add(PlayerData(slot, line, kills))
+                slot++
             }
         }
+
         return players.take(20)
     }
 
-    private fun sendPlayers(players: List<PlayerData>) {
+private fun sendPlayers(players: List<PlayerData>) {
         val arr = JSONArray()
         players.forEach {
             val obj = JSONObject()
