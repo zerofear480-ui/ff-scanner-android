@@ -6,7 +6,6 @@ import android.content.pm.ServiceInfo
 import android.graphics.Bitmap
 import android.graphics.PixelFormat
 import android.hardware.display.DisplayManager
-import android.hardware.display.VirtualDisplay
 import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
@@ -27,41 +26,28 @@ class ScreenCaptureService : Service() {
 
     private val channelId = "ff_scanner_channel"
     private val notificationId = 101
-
     private val handler = Handler(Looper.getMainLooper())
     private val client = OkHttpClient()
     private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
 
     private var projection: MediaProjection? = null
     private var imageReader: ImageReader? = null
-    private var virtualDisplay: VirtualDisplay? = null
     private var running = false
     private var apiUrl = "http://13.204.87.106:8000/api/ocr-scan"
-
-    private val projectionCallback = object : MediaProjection.Callback() {
-        override fun onStop() {
-            stopScanner()
-        }
-    }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         apiUrl = intent?.getStringExtra("apiUrl") ?: apiUrl
 
         createChannel()
-        val notification = buildNotification("Capturing screen for OCR")
+        val notification = buildNotification()
 
         if (Build.VERSION.SDK_INT >= 29) {
-            startForeground(
-                notificationId,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION
-            )
+            startForeground(notificationId, notification, ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION)
         } else {
             startForeground(notificationId, notification)
         }
 
-        val resultCode = intent?.getIntExtra("resultCode", Activity.RESULT_CANCELED)
-            ?: Activity.RESULT_CANCELED
+        val resultCode = intent?.getIntExtra("resultCode", Activity.RESULT_CANCELED) ?: Activity.RESULT_CANCELED
 
         val data = if (Build.VERSION.SDK_INT >= 33) {
             intent?.getParcelableExtra("data", Intent::class.java)
@@ -83,8 +69,6 @@ class ScreenCaptureService : Service() {
         val manager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         projection = manager.getMediaProjection(resultCode, data)
 
-        projection?.registerCallback(projectionCallback, handler)
-
         val wm = getSystemService(WINDOW_SERVICE) as WindowManager
         val metrics = DisplayMetrics()
         @Suppress("DEPRECATION")
@@ -97,7 +81,7 @@ class ScreenCaptureService : Service() {
             2
         )
 
-        virtualDisplay = projection?.createVirtualDisplay(
+        projection?.createVirtualDisplay(
             "FFScannerDisplay",
             metrics.widthPixels,
             metrics.heightPixels,
@@ -114,16 +98,11 @@ class ScreenCaptureService : Service() {
 
     private fun scanLoop() {
         if (!running) return
-
         captureAndOcr()
-
-        handler.postDelayed({
-            scanLoop()
-        }, 4000)
+        handler.postDelayed({ scanLoop() }, 4000)
     }
 
     private fun captureAndOcr() {
-        sendDebugText("SCAN_LOOP_RUNNING")
         try {
             val reader = imageReader ?: return
             val image = reader.acquireLatestImage() ?: return
@@ -144,71 +123,57 @@ class ScreenCaptureService : Service() {
             image.close()
 
             val prefs = getSharedPreferences("ocr_box", MODE_PRIVATE)
+            val x = prefs.getInt("x", 120).coerceAtLeast(0).coerceAtMost(bitmap.width - 1)
+            val y = prefs.getInt("y", 220).coerceAtLeast(0).coerceAtMost(bitmap.height - 1)
+            val w = prefs.getInt("w", 600).coerceAtLeast(100).coerceAtMost(bitmap.width - x)
+            val h = prefs.getInt("h", 600).coerceAtLeast(100).coerceAtMost(bitmap.height - y)
 
-            val savedX = prefs.getInt("x", 120)
-            val savedY = prefs.getInt("y", 220)
-            val savedW = prefs.getInt("w", 600)
-            val savedH = prefs.getInt("h", 600)
-
-            val cropX = savedX.coerceAtLeast(0).coerceAtMost(bitmap.width - 1)
-            val cropY = savedY.coerceAtLeast(0).coerceAtMost(bitmap.height - 1)
-
-            val cropW = savedW.coerceAtLeast(100).coerceAtMost(bitmap.width - cropX)
-            val cropH = savedH.coerceAtLeast(100).coerceAtMost(bitmap.height - cropY)
-
-            val cropped = Bitmap.createBitmap(
-                bitmap,
-                cropX,
-                cropY,
-                cropW,
-                cropH
-            )
+            val cropped = Bitmap.createBitmap(bitmap, x, y, w, h)
             val inputImage = InputImage.fromBitmap(cropped, 0)
 
             recognizer.process(inputImage)
                 .addOnSuccessListener { result ->
+                    sendDebug(result.text, x, y, w, h)
+
                     val players = parsePlayers(result.text)
                     if (players.isNotEmpty()) {
                         sendPlayers(players)
-                    } else {
-                     //   sendDebugText(result.text)
                     }
                 }
-        } catch (e: Exception) {
-            // keep service alive
-        }
+
+        } catch (_: Exception) {}
     }
 
-    
-private fun parsePlayers(text: String): List<PlayerData> {
+    private fun sendDebug(text: String, x: Int, y: Int, w: Int, h: Int) {
+        val root = JSONObject()
+        root.put("ocr_text", text.take(2000))
+        root.put("players", JSONArray())
+        root.put("box_x", x)
+        root.put("box_y", y)
+        root.put("box_w", w)
+        root.put("box_h", h)
+
+        val debugUrl = apiUrl.replace("/api/ocr-scan", "/api/ocr-debug")
+        val body = root.toString().toRequestBody("application/json".toMediaType())
+
+        val req = Request.Builder().url(debugUrl).post(body).build()
+        client.newCall(req).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: java.io.IOException) {}
+            override fun onResponse(call: Call, response: Response) { response.close() }
+        })
+    }
+
+    private fun parsePlayers(text: String): List<PlayerData> {
         val players = mutableListOf<PlayerData>()
-
-        val ignoreWords = listOf(
-            "players", "safe zone", "bermuda", "game", "hp", "ep",
-            "alive", "kill", "team", "spectating"
-        )
-
         var slot = 1
 
         text.lines().forEach { raw ->
-            val line = raw.trim()
-                .replace("|", " ")
-                .replace("  ", " ")
-
-            if (line.length < 3) return@forEach
-
-            val lower = line.lowercase()
-            if (ignoreWords.any { lower.contains(it) }) return@forEach
-
+            val line = raw.trim().replace("|", " ")
             val m = Regex("""^(.+?)\s+(\d{1,2})$""").find(line)
 
             if (m != null) {
-                var name = m.groupValues[1].trim()
+                val name = m.groupValues[1].trim()
                 val kills = m.groupValues[2].toIntOrNull() ?: return@forEach
-
-                name = name
-                    .replace(Regex("""[^A-Za-z0-9_ .!'₹-]"""), "")
-                    .trim()
 
                 if (name.length >= 2 && kills in 0..99) {
                     players.add(PlayerData(slot, name, kills))
@@ -220,7 +185,7 @@ private fun parsePlayers(text: String): List<PlayerData> {
         return players.take(20)
     }
 
-private fun sendPlayers(players: List<PlayerData>) {
+    private fun sendPlayers(players: List<PlayerData>) {
         val arr = JSONArray()
 
         players.forEach {
@@ -233,73 +198,49 @@ private fun sendPlayers(players: List<PlayerData>) {
 
         val root = JSONObject()
         root.put("players", arr)
-        root.put("debug", true)
-        root.put("source", "ff_scanner_app")
 
         val body = root.toString().toRequestBody("application/json".toMediaType())
-
-        val req = Request.Builder()
-            .url(apiUrl)
-            .post(body)
-            .build()
+        val req = Request.Builder().url(apiUrl).post(body).build()
 
         client.newCall(req).enqueue(object : Callback {
             override fun onFailure(call: Call, e: java.io.IOException) {}
-            override fun onResponse(call: Call, response: Response) {
-                response.close()
-            }
+            override fun onResponse(call: Call, response: Response) { response.close() }
         })
-    }
-
-    private fun stopScanner() {
-        running = false
-        try { virtualDisplay?.release() } catch (_: Exception) {}
-        try { imageReader?.close() } catch (_: Exception) {}
-        try { projection?.unregisterCallback(projectionCallback) } catch (_: Exception) {}
-        try { projection?.stop() } catch (_: Exception) {}
-        stopSelf()
-    }
-
-    override fun onDestroy() {
-        stopScanner()
-        super.onDestroy()
     }
 
     private fun createChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                channelId,
-                "FF Scanner",
-                NotificationManager.IMPORTANCE_LOW
-            )
-            val manager = getSystemService(NotificationManager::class.java)
-            manager.createNotificationChannel(channel)
+            val channel = NotificationChannel(channelId, "FF Scanner", NotificationManager.IMPORTANCE_LOW)
+            getSystemService(NotificationManager::class.java).createNotificationChannel(channel)
         }
     }
 
-    private fun buildNotification(text: String): Notification {
+    private fun buildNotification(): Notification {
         return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             Notification.Builder(this, channelId)
                 .setContentTitle("FF Scanner is running")
-                .setContentText(text)
+                .setContentText("Capturing OCR box")
                 .setSmallIcon(android.R.drawable.ic_menu_camera)
                 .setOngoing(true)
                 .build()
         } else {
             Notification.Builder(this)
                 .setContentTitle("FF Scanner is running")
-                .setContentText(text)
+                .setContentText("Capturing OCR box")
                 .setSmallIcon(android.R.drawable.ic_menu_camera)
                 .setOngoing(true)
                 .build()
         }
     }
 
-    override fun onBind(intent: Intent?): IBinder? = null
+    override fun onDestroy() {
+        running = false
+        imageReader?.close()
+        projection?.stop()
+        super.onDestroy()
+    }
 
-    data class PlayerData(
-        val slot: Int,
-        val name: String,
-        val kills: Int
-    )
+    override fun onBind(intent: Intent?) = null
+
+    data class PlayerData(val slot: Int, val name: String, val kills: Int)
 }

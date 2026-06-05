@@ -1,3 +1,0 @@
-/workspaces/ff-scanner-android/app/src/main/java/com/raj/ffscanner/ScreenCaptureService.kt
-/workspaces/ff-scanner-android/app/src/main/java/com/raj/ffscanner/MainActivity.kt
-/workspaces/ff-scanner-android/app/src/main/java/com/raj/ffscanner/OverlayService.kt
