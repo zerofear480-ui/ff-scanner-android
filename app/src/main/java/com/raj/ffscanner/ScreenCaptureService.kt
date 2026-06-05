@@ -210,7 +210,7 @@ class ScreenCaptureService : Service() {
                         val rowTop = (cy - 38).coerceAtLeast(0)
                         val rowH = 76.coerceAtMost(killCrop.height - rowTop)
                         val rowCrop = Bitmap.createBitmap(killCrop, 0, rowTop, killCrop.width, rowH)
-                        val bigRow = preprocessDigitRow(rowCrop)
+                        val bigRow = upscaleBitmap(rowCrop, 4)
 
                         recognizer.process(InputImage.fromBitmap(bigRow, 0))
                             .addOnSuccessListener { r ->
