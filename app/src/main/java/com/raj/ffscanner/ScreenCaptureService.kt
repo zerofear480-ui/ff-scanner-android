@@ -194,35 +194,41 @@ class ScreenCaptureService : Service() {
 
             recognizer.process(InputImage.fromBitmap(nameCrop, 0))
                 .addOnSuccessListener { nameResult ->
-                    recognizer.process(InputImage.fromBitmap(killCrop, 0))
-                        .addOnSuccessListener { killResult ->
 
-                            val names = extractNamesWithY(nameResult)
-                            val kills = extractKillsWithY(killResult)
+                    val names = extractNamesWithY(nameResult)
+                    val players = mutableListOf<PlayerData>()
 
-                            val players = mutableListOf<PlayerData>()
-
-                            names.forEachIndexed { index, item ->
-                                val nearest = kills.minByOrNull { kotlin.math.abs(it.y - item.y) }
-                                val kill = if (nearest != null && kotlin.math.abs(nearest.y - item.y) < 45) nearest.value else 0
-                                players.add(PlayerData(index + 1, item.name, kill))
-                            }
-
-                            OverlayService.addLog("Mapped players=${players.size}")
-                            OverlayService.addLog("Kill OCR text=${killResult.text.take(80)}")
-
-                            sendDebug(
-                                "NAMES:\\n${nameResult.text}\\n\\nKILLS:\\n${killResult.text}",
-                                x, y, w, h
-                            )
-
-                            if (players.isNotEmpty()) {
-                                sendPlayers(players)
-                            }
+                    fun readRow(i: Int) {
+                        if (i >= names.size) {
+                            OverlayService.addLog("Final players=${players.size}")
+                            if (players.isNotEmpty()) sendPlayers(players)
+                            sendDebug("NAMES:\\n${nameResult.text}", x, y, w, h)
+                            return
                         }
-                        .addOnFailureListener {
-                            OverlayService.addLog("Kill OCR error: ${it.message}")
-                        }
+
+                        val cy = names[i].y
+                        val rowTop = (cy - 38).coerceAtLeast(0)
+                        val rowH = 76.coerceAtMost(killCrop.height - rowTop)
+                        val rowCrop = Bitmap.createBitmap(killCrop, 0, rowTop, killCrop.width, rowH)
+                        val bigRow = upscaleBitmap(rowCrop, 4)
+
+                        recognizer.process(InputImage.fromBitmap(bigRow, 0))
+                            .addOnSuccessListener { r ->
+                                val nums = parseKillsOnly(r.text)
+                                val kill = nums.firstOrNull() ?: 0
+
+                                OverlayService.addLog("Kill row ${i + 1}: ${names[i].name} = $kill text=${r.text.take(20)}")
+                                players.add(PlayerData(i + 1, names[i].name, kill))
+                                readRow(i + 1)
+                            }
+                            .addOnFailureListener {
+                                OverlayService.addLog("Kill row ${i + 1} fail")
+                                players.add(PlayerData(i + 1, names[i].name, 0))
+                                readRow(i + 1)
+                            }
+                    }
+
+                    readRow(0)
                 }
                 .addOnFailureListener {
                     OverlayService.addLog("Name OCR error: ${it.message}")
@@ -354,6 +360,11 @@ class ScreenCaptureService : Service() {
         }
 
         return list
+    }
+
+
+    private fun upscaleBitmap(src: Bitmap, scale: Int): Bitmap {
+        return Bitmap.createScaledBitmap(src, src.width * scale, src.height * scale, false)
     }
 
     private fun uploadKillCropDebug(cropped: Bitmap) {
