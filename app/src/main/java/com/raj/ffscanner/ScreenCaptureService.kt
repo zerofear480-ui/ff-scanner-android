@@ -123,6 +123,7 @@ class ScreenCaptureService : Service() {
     }
 
     private fun captureAndOcr() {
+        sendDebugText("SCAN_LOOP_RUNNING")
         try {
             val reader = imageReader ?: return
             val image = reader.acquireLatestImage() ?: return
