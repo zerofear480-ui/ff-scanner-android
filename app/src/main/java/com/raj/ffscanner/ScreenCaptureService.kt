@@ -291,22 +291,22 @@ class ScreenCaptureService : Service() {
     }
 
     private fun parseKillsOnly(text: String): List<Int> {
-        val nums = mutableListOf<Int>()
+        return text.lines().mapNotNull { line ->
+            val cleaned = line.trim()
+                .replace("O", "0")
+                .replace("o", "0")
+                .replace("I", "1")
+                .replace("l", "1")
+                .replace("|", "1")
+                .replace(Regex("""[^0-9]"""), "")
 
-        Regex("""\b\d{1,2}\b""").findAll(text).forEach { m ->
-            val n = m.value.toIntOrNull()
-            if (n != null && n in 0..99) {
-                nums.add(n)
+            if (cleaned.matches(Regex("""^\d{1,2}$"""))) {
+                cleaned.toIntOrNull()
+            } else {
+                null
             }
         }
-
-        return nums.take(20)
     }
-
-
-
-    data class NameY(val name: String, val y: Int)
-    data class KillY(val value: Int, val y: Int)
 
     private fun extractNamesWithY(result: com.google.mlkit.vision.text.Text): List<NameY> {
         val list = mutableListOf<NameY>()
