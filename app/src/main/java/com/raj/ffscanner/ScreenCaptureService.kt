@@ -223,13 +223,17 @@ class ScreenCaptureService : Service() {
         })
     }
 
-    private fun parsePlayers(text: String): List<PlayerData> {
+    
+private fun parsePlayers(text: String): List<PlayerData> {
         val players = mutableListOf<PlayerData>()
         var slot = 1
 
         val ignore = listOf(
             "players", "safe", "zone", "bermuda", "game", "hp", "ep",
-            "alive", "spectating"
+            "alive", "spectating", "permission", "projection", "starting",
+            "debug", "sent", "capture", "crop", "scale", "ocr", "length",
+            "booyah", "paid", "app", "ok", "final", "round", "service",
+            "destroyed", "stopped", "tick"
         )
 
         text.lines().forEach { raw ->
@@ -237,6 +241,7 @@ class ScreenCaptureService : Service() {
                 .replace("|", " ")
                 .replace(">", "")
                 .replace(")", "")
+                .replace("(", "")
                 .replace("  ", " ")
 
             if (line.length < 3) return@forEach
@@ -255,16 +260,17 @@ class ScreenCaptureService : Service() {
 
             line = line.replace(Regex("""[^A-Za-z0-9_ .!'₹-]"""), "").trim()
 
-            if (line.length >= 2) {
-                players.add(PlayerData(slot, line, kills))
-                slot++
-            }
+            if (line.length < 3) return@forEach
+            if (line.split(" ").size > 4) return@forEach
+
+            players.add(PlayerData(slot, line, kills))
+            slot++
         }
 
         return players.take(20)
     }
 
-    private fun sendPlayers(players: List<PlayerData>) {
+private fun sendPlayers(players: List<PlayerData>) {
         val arr = JSONArray()
 
         players.forEach {
