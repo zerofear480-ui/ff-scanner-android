@@ -11,6 +11,7 @@ import android.media.ImageReader
 import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.*
+import android.os.Environment
 import android.util.DisplayMetrics
 import android.view.WindowManager
 import com.google.mlkit.vision.common.InputImage
@@ -177,11 +178,15 @@ class ScreenCaptureService : Service() {
             val cropped = Bitmap.createBitmap(bitmap, x, y, w, h)
 
             try {
-                val file = File(getExternalFilesDir(null), "crop_debug.png")
+                val dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+                if (!dir.exists()) dir.mkdirs()
+
+                val file = File(dir, "crop_debug.png")
                 FileOutputStream(file).use { out ->
                     cropped.compress(Bitmap.CompressFormat.PNG, 100, out)
                 }
-                OverlayService.addLog("Crop saved: ${file.absolutePath}")
+
+                OverlayService.addLog("Crop saved: Pictures/crop_debug.png")
             } catch (e: Exception) {
                 OverlayService.addLog("Crop save error: ${e.message}")
             }
