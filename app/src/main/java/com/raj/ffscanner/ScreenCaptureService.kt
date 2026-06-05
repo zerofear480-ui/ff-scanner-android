@@ -297,7 +297,8 @@ private fun parsePlayers(text: String): List<PlayerData> {
 
             if (m != null) {
                 line = m.groupValues[1].trim()
-                kills = m.groupValues[2].toIntOrNull() ?: 0
+                val killText = m.groupValues[2]
+                kills = if (killText.length > 1 && killText.startsWith("0")) 0 else (killText.toIntOrNull() ?: 0)
             }
 
             line = line.replace(Regex("""[^A-Za-z0-9_ .!'₹-]"""), "").trim()
