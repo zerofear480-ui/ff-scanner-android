@@ -183,7 +183,7 @@ class ScreenCaptureService : Service() {
                     cropped.compress(Bitmap.CompressFormat.PNG, 100, out)
                 }
 
-                OverlayService.addLog("Crop saved: app files/crop_debug.png")
+                OverlayService.addLog("Crop saved: Downloads/crop_debug.png")
             } catch (e: Exception) {
                 OverlayService.addLog("Crop save error: ${e.message}")
             }
