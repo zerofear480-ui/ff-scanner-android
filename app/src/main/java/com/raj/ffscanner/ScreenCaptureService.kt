@@ -586,7 +586,7 @@ private fun parseNamesOnly(text: String): List<String> {
                 )
                 .build()
 
-            val url = apiUrl.replace("/api/ocr-scan", "/api/crop-debug")
+            val url = apiUrl.replace("/api/ocr-scan", "/api/gemini-scan")
             val req = Request.Builder().url(url).post(body).build()
 
             client.newCall(req).enqueue(object : Callback {
