@@ -40,7 +40,7 @@ class ScreenCaptureService : Service() {
     private var imageReader: ImageReader? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var running = false
-    private var apiUrl = "http://13.204.87.106:8000/api/ocr-scan"
+    private var apiUrl = "http://13.204.87.106:8000/api/gemini-scan"
 
     private val projectionCallback = object : MediaProjection.Callback() {
         override fun onStop() {
@@ -522,7 +522,7 @@ private fun parseNamesOnly(text: String): List<String> {
                 )
                 .build()
 
-            val url = apiUrl.replace("/api/ocr-scan", "/api/row-debug/$rowId")
+            val url = apiUrl.replace("/api/gemini-scan", "/api/row-debug/$rowId")
             val req = Request.Builder().url(url).post(body).build()
 
             client.newCall(req).enqueue(object : Callback {
@@ -554,7 +554,7 @@ private fun parseNamesOnly(text: String): List<String> {
                 )
                 .build()
 
-            val url = apiUrl.replace("/api/ocr-scan", "/api/kill-debug")
+            val url = apiUrl.replace("/api/gemini-scan", "/api/kill-debug")
             val req = Request.Builder().url(url).post(body).build()
 
             client.newCall(req).enqueue(object : Callback {
@@ -586,7 +586,7 @@ private fun parseNamesOnly(text: String): List<String> {
                 )
                 .build()
 
-            val url = apiUrl.replace("/api/ocr-scan", "/api/gemini-scan")
+            val url = apiUrl.replace("/api/gemini-scan", "/api/gemini-scan")
             val req = Request.Builder().url(url).post(body).build()
 
             client.newCall(req).enqueue(object : Callback {
@@ -613,7 +613,7 @@ private fun parseNamesOnly(text: String): List<String> {
         root.put("box_w", w)
         root.put("box_h", h)
 
-        val debugUrl = apiUrl.replace("/api/ocr-scan", "/api/ocr-debug")
+        val debugUrl = apiUrl.replace("/api/gemini-scan", "/api/ocr-debug")
         val body = root.toString().toRequestBody("application/json".toMediaType())
         val req = Request.Builder().url(debugUrl).post(body).build()
 
