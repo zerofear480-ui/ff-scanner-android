@@ -252,6 +252,11 @@ class OverlayService : Service() {
         val realW = box.width
         val realH = box.height
 
+        if (realW < 250 || realH < 250) {
+            addLog("BOX_SAVE_SKIPPED_SMALL w=$realW h=$realH")
+            return
+        }
+
         getSharedPreferences("ocr_box", MODE_PRIVATE).edit()
             .putInt("x", realX)
             .putInt("y", realY)

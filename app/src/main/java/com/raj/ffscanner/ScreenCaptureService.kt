@@ -122,7 +122,7 @@ class ScreenCaptureService : Service() {
     private fun scanLoop() {
         if (!running) return
         captureAndOcr()
-        handler.postDelayed({ scanLoop() }, 4000)
+        handler.postDelayed({ scanLoop() }, 1000)
     }
 
     private fun captureAndOcr() {
@@ -181,7 +181,8 @@ class ScreenCaptureService : Service() {
 
             OverlayService.addLog("Local crop save disabled")
 
-            uploadCropDebug(cropped)
+            OverlayService.addLog("SEND_CROP w=${cropped.width} h=${cropped.height}")
+        uploadCropDebug(cropped)
 
             val fullImage = InputImage.fromBitmap(cropped, 0)
 
@@ -595,7 +596,17 @@ private fun parseNamesOnly(text: String): List<String> {
                 }
 
                 override fun onResponse(call: Call, response: Response) {
-                    OverlayService.addLog("Crop uploaded ${response.code}")
+                    val bodyText = response.body?.string() ?: ""
+OverlayService.addLog("Crop uploaded ${response.code}")
+
+try {
+    val json = org.json.JSONObject(bodyText)
+    OverlayService.addLog("RECEIVED_CROP w=${json.optInt("received_w", 0)} h=${json.optInt("received_h", 0)}")
+    OverlayService.addLog("HEADERS=${json.optInt("headers", 0)}")
+    OverlayService.addLog("PLAYERS=${json.optInt("players_count", json.optInt("count", 0))}")
+} catch (e: Exception) {
+    OverlayService.addLog("BACKEND_LOG_PARSE_FAILED")
+}
                     response.close()
                 }
             })

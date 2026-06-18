@@ -3,6 +3,7 @@ package com.raj.ffscanner
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
+import android.content.ComponentName
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -53,6 +54,15 @@ class MainActivity : Activity() {
         val stopBtn = Button(this)
         stopBtn.text = "STOP SCANNER"
 
+        val accessibilityBtn = Button(this)
+        accessibilityBtn.text = "ALLOW AUTO SCROLL PERMISSION"
+
+        val startScrollBtn = Button(this)
+        startScrollBtn.text = "START AUTO SCROLL"
+
+        val stopScrollBtn = Button(this)
+        stopScrollBtn.text = "STOP AUTO SCROLL"
+
         overlayPermissionBtn.setOnClickListener {
             if (!Settings.canDrawOverlays(this)) {
                 val intent = Intent(
@@ -90,6 +100,28 @@ class MainActivity : Activity() {
             status.text = "Status: Scanner stopped"
         }
 
+        accessibilityBtn.setOnClickListener {
+            val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+            startActivity(intent)
+            status.text = "Status: Enable FF Scanner auto scroll service"
+        }
+
+        startScrollBtn.setOnClickListener {
+            val service = AutoScrollAccessibilityService.instance
+            if (service == null) {
+                status.text = "Status: Enable auto scroll permission first"
+                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            } else {
+                service.startAutoScroll()
+                status.text = "Status: Auto scroll started"
+            }
+        }
+
+        stopScrollBtn.setOnClickListener {
+            AutoScrollAccessibilityService.instance?.stopAutoScroll()
+            status.text = "Status: Auto scroll stopped"
+        }
+
         layout.addView(title)
         layout.addView(status)
         layout.addView(apiInput)
@@ -98,6 +130,9 @@ class MainActivity : Activity() {
         layout.addView(hideBoxBtn)
         layout.addView(startBtn)
         layout.addView(stopBtn)
+        layout.addView(accessibilityBtn)
+        layout.addView(startScrollBtn)
+        layout.addView(stopScrollBtn)
 
         setContentView(layout)
 
