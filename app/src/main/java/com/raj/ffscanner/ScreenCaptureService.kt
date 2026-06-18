@@ -30,23 +30,35 @@ import java.io.ByteArrayOutputStream
 
 class ScreenCaptureService : Service() {
 
+    companion object {
+        const val ACTION_START_OCR = "com.raj.ffscanner.START_OCR"
+        const val ACTION_STOP_OCR = "com.raj.ffscanner.STOP_OCR"
+        private const val MIN_CAPTURE_INTERVAL_MS = 1000L
+    }
+
     private val channelId = "ff_scanner_channel"
     private val notificationId = 101
     private val handler = Handler(Looper.getMainLooper())
     private val client = OkHttpClient()
     private val recognizer = TextRecognition.getClient(TextRecognizerOptions.DEFAULT_OPTIONS)
+    private val scanRunnable = object : Runnable {
+        override fun run() {
+            scanLoop()
+        }
+    }
 
     private var projection: MediaProjection? = null
     private var imageReader: ImageReader? = null
     private var virtualDisplay: VirtualDisplay? = null
-    private var running = false
+    private var scanRunning = false
+    private var scanBusy = false
+    private var lastCaptureTime = 0L
     private var lastCropUploadAt = 0L
     private var apiUrl = "http://13.204.87.106:8000/api/gemini-scan"
 
     private val projectionCallback = object : MediaProjection.Callback() {
         override fun onStop() {
-            running = false
-            OverlayService.addLog("Projection stopped")
+            stopScanning(logStop = true)
         }
     }
 
@@ -66,22 +78,30 @@ class ScreenCaptureService : Service() {
             startForeground(notificationId, notification)
         }
 
-        val resultCode = intent?.getIntExtra("resultCode", Activity.RESULT_CANCELED)
-            ?: Activity.RESULT_CANCELED
+        when (intent?.action) {
+            ACTION_START_OCR -> {
+                val resultCode = intent.getIntExtra("resultCode", Activity.RESULT_CANCELED)
 
-        val data = if (Build.VERSION.SDK_INT >= 33) {
-            intent?.getParcelableExtra("data", Intent::class.java)
-        } else {
-            @Suppress("DEPRECATION")
-            intent?.getParcelableExtra<Intent>("data")
-        }
+                val data = if (Build.VERSION.SDK_INT >= 33) {
+                    intent.getParcelableExtra("data", Intent::class.java)
+                } else {
+                    @Suppress("DEPRECATION")
+                    intent.getParcelableExtra<Intent>("data")
+                }
 
-        if (resultCode == Activity.RESULT_OK && data != null) {
-            OverlayService.addLog("Permission OK, starting projection")
-            startProjection(resultCode, data)
-        } else {
-            OverlayService.addLog("Permission denied")
-            stopSelf()
+                if (resultCode == Activity.RESULT_OK && data != null) {
+                    if (projection == null) {
+                        startProjection(resultCode, data)
+                    }
+                    startScanning()
+                } else {
+                    stopSelf()
+                }
+            }
+            ACTION_STOP_OCR -> {
+                stopScanning(logStop = true)
+                stopSelf()
+            }
         }
 
         return START_NOT_STICKY
@@ -114,40 +134,78 @@ class ScreenCaptureService : Service() {
             null,
             handler
         )
+    }
 
-        OverlayService.addLog("Projection created")
-        running = true
-        scanLoop()
+    private fun startScanning() {
+        if (scanRunning) return
+        scanRunning = true
+        scanBusy = false
+        lastCaptureTime = 0L
+        handler.removeCallbacks(scanRunnable)
+        OverlayService.addLog("START OCR")
+        scanRunnable.run()
+    }
+
+    private fun stopScanning(logStop: Boolean) {
+        val wasRunning = scanRunning || scanBusy
+        scanRunning = false
+        scanBusy = false
+        handler.removeCallbacks(scanRunnable)
+        if (logStop && wasRunning) {
+            OverlayService.addLog("STOP OCR")
+        }
+    }
+
+    private fun scheduleNextScan(delayMs: Long = MIN_CAPTURE_INTERVAL_MS) {
+        if (!scanRunning) return
+        handler.removeCallbacks(scanRunnable)
+        handler.postDelayed(scanRunnable, delayMs)
     }
 
     private fun scanLoop() {
-        if (!running) return
+        if (!scanRunning) return
         captureAndOcr()
-        handler.postDelayed({ scanLoop() }, 1000)
     }
 
     private fun captureAndOcr() {
+        if (!scanRunning) return
+        if (scanBusy) {
+            scheduleNextScan()
+            return
+        }
+
+        val now = System.currentTimeMillis()
+        val elapsed = now - lastCaptureTime
+        if (elapsed < MIN_CAPTURE_INTERVAL_MS) {
+            scheduleNextScan(MIN_CAPTURE_INTERVAL_MS - elapsed)
+            return
+        }
+
+        scanBusy = true
+        lastCaptureTime = now
 
         try {
             val reader = imageReader ?: run {
-                OverlayService.addLog("ImageReader null")
+                finishCapture()
                 return
             }
 
             val image = reader.acquireLatestImage() ?: run {
-                OverlayService.addLog("No image yet")
+                finishCapture()
                 return
             }
+            val captureWidth = image.width
+            val captureHeight = image.height
 
             val plane = image.planes[0]
             val buffer: ByteBuffer = plane.buffer
             val pixelStride = plane.pixelStride
             val rowStride = plane.rowStride
-            val rowPadding = rowStride - pixelStride * image.width
+            val rowPadding = rowStride - pixelStride * captureWidth
 
             val bitmap = Bitmap.createBitmap(
-                image.width + rowPadding / pixelStride,
-                image.height,
+                captureWidth + rowPadding / pixelStride,
+                captureHeight,
                 Bitmap.Config.ARGB_8888
             )
 
@@ -161,23 +219,17 @@ class ScreenCaptureService : Service() {
             val savedW = prefs.getInt("w", 600)
             val savedH = prefs.getInt("h", 600)
 
-            val x = savedX.coerceAtLeast(0).coerceAtMost(bitmap.width - 1)
-            val y = savedY.coerceAtLeast(0).coerceAtMost(bitmap.height - 1)
-            val w = savedW.coerceAtLeast(100).coerceAtMost(bitmap.width - x)
-            val h = savedH.coerceAtLeast(100).coerceAtMost(bitmap.height - y)
+            val x = savedX.coerceAtLeast(0).coerceAtMost(captureWidth - 1)
+            val y = savedY.coerceAtLeast(0).coerceAtMost(captureHeight - 1)
+            val w = savedW.coerceAtLeast(1).coerceAtMost(captureWidth - x)
+            val h = savedH.coerceAtLeast(1).coerceAtMost(captureHeight - y)
 
 
             val cropped = Bitmap.createBitmap(bitmap, x, y, w, h)
 
-
-            OverlayService.addLog("SEND_CROP w=${cropped.width} h=${cropped.height}")
-        uploadCropDebug(cropped)
+            uploadCropDebug(cropped)
 
             val fullImage = InputImage.fromBitmap(cropped, 0)
-
-            val killX = (cropped.width * 0.86f).toInt()
-            val killCrop = Bitmap.createBitmap(cropped, killX, 0, cropped.width - killX, cropped.height)
-            uploadKillCropDebug(killCrop)
 
             recognizer.process(fullImage)
                 .addOnSuccessListener { result ->
@@ -185,8 +237,6 @@ class ScreenCaptureService : Service() {
 
 
                     if (players.isNotEmpty()) {
-                        val slotLog = players.map { it.slot }.distinct().joinToString(",")
-                        val killLog = players.joinToString(",") { it.kills.toString() }
                         sendPlayers(players)
                     } else {
                     }
@@ -195,15 +245,24 @@ class ScreenCaptureService : Service() {
                         "FULL OCR:\\n${result.text}",
                         x, y, w, h
                     )
+                    OverlayService.addLog("OCR SUCCESS")
+                    finishCapture()
                 }
                 .addOnFailureListener {
-                    OverlayService.addLog("OCR error: ${it.message}")
+                    OverlayService.addLog("OCR ERROR")
+                    finishCapture()
                 }
 
         } catch (e: Exception) {
-            OverlayService.addLog("Capture error: ${e.message}")
+            OverlayService.addLog("OCR ERROR")
             sendDebug("CAPTURE_ERROR: ${e.message}", 0, 0, 0, 0)
+            finishCapture()
         }
+    }
+
+    private fun finishCapture() {
+        scanBusy = false
+        scheduleNextScan()
     }
 
     private fun parseSlotHeaders(text: String): List<Int> {
@@ -513,16 +572,13 @@ private fun parseNamesOnly(text: String): List<String> {
 
             client.newCall(req).enqueue(object : Callback {
                 override fun onFailure(call: Call, e: java.io.IOException) {
-                    OverlayService.addLog("Row $rowId upload failed")
                 }
 
                 override fun onResponse(call: Call, response: Response) {
-                    OverlayService.addLog("Row $rowId uploaded ${response.code}")
                     response.close()
                 }
             })
         } catch (e: Exception) {
-            OverlayService.addLog("Row upload error: ${e.message}")
         }
     }
 
@@ -545,16 +601,13 @@ private fun parseNamesOnly(text: String): List<String> {
 
             client.newCall(req).enqueue(object : Callback {
                 override fun onFailure(call: Call, e: java.io.IOException) {
-                    OverlayService.addLog("Kill crop upload failed: ${e.message}")
                 }
 
                 override fun onResponse(call: Call, response: Response) {
-                    OverlayService.addLog("Kill crop uploaded ${response.code}")
                     response.close()
                 }
             })
         } catch (e: Exception) {
-            OverlayService.addLog("Kill crop upload error: ${e.message}")
         }
     }
 
@@ -583,26 +636,16 @@ private fun parseNamesOnly(text: String): List<String> {
 
             client.newCall(req).enqueue(object : Callback {
                 override fun onFailure(call: Call, e: java.io.IOException) {
-                    OverlayService.addLog("Crop upload failed: ${e.message}")
+                    OverlayService.addLog("OCR ERROR")
                 }
 
                 override fun onResponse(call: Call, response: Response) {
-                    val bodyText = response.body?.string() ?: ""
-OverlayService.addLog("Crop uploaded ${response.code}")
-
-try {
-    val json = org.json.JSONObject(bodyText)
-    OverlayService.addLog("RECEIVED_CROP w=${json.optInt("received_w", 0)} h=${json.optInt("received_h", 0)}")
-    OverlayService.addLog("HEADERS=${json.optInt("headers", 0)}")
-    OverlayService.addLog("PLAYERS=${json.optInt("players_count", json.optInt("count", 0))}")
-} catch (e: Exception) {
-    OverlayService.addLog("BACKEND_LOG_PARSE_FAILED")
-}
+                    OverlayService.addLog("CAPTURE SENT")
                     response.close()
                 }
             })
         } catch (e: Exception) {
-            OverlayService.addLog("Crop upload error: ${e.message}")
+            OverlayService.addLog("OCR ERROR")
         }
     }
 
@@ -621,11 +664,9 @@ try {
 
         client.newCall(req).enqueue(object : Callback {
             override fun onFailure(call: Call, e: java.io.IOException) {
-                OverlayService.addLog("Debug send failed: ${e.message}")
             }
 
             override fun onResponse(call: Call, response: Response) {
-                OverlayService.addLog("Debug sent ${response.code}")
                 response.close()
             }
         })
@@ -698,11 +739,9 @@ private fun sendPlayers(players: List<PlayerData>) {
 
         client.newCall(req).enqueue(object : Callback {
             override fun onFailure(call: Call, e: java.io.IOException) {
-                OverlayService.addLog("Players send failed: ${e.message}")
             }
 
             override fun onResponse(call: Call, response: Response) {
-                OverlayService.addLog("Players sent ${response.code}")
                 response.close()
             }
         })
@@ -738,12 +777,11 @@ private fun sendPlayers(players: List<PlayerData>) {
     }
 
     override fun onDestroy() {
-        running = false
+        stopScanning(logStop = true)
         try { virtualDisplay?.release() } catch (_: Exception) {}
         try { imageReader?.close() } catch (_: Exception) {}
         try { projection?.unregisterCallback(projectionCallback) } catch (_: Exception) {}
         try { projection?.stop() } catch (_: Exception) {}
-        OverlayService.addLog("Service destroyed")
         super.onDestroy()
     }
 

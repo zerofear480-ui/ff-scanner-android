@@ -38,8 +38,6 @@ class OverlayService : Service() {
 
         createOcrBox()
         createControlPanel()
-
-        addLog("Overlay opened")
     }
 
     private fun createOcrBox() {
@@ -98,7 +96,6 @@ class OverlayService : Service() {
                     }
                     MotionEvent.ACTION_UP -> {
                         saveBox()
-                        addLog("Box saved x=${boxParams.x} y=${boxParams.y} w=${boxParams.width} h=${boxParams.height}")
                         return true
                     }
                 }
@@ -131,7 +128,6 @@ class OverlayService : Service() {
                     }
                     MotionEvent.ACTION_UP -> {
                         saveBox()
-                        addLog("Box resized w=${boxParams.width} h=${boxParams.height}")
                         return true
                     }
                 }
@@ -212,7 +208,6 @@ class OverlayService : Service() {
         })
 
         startBtn.setOnClickListener {
-            addLog("Opening app to start OCR")
             val intent = Intent(this, MainActivity::class.java)
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             intent.putExtra("auto_start_ocr", true)
@@ -221,12 +216,10 @@ class OverlayService : Service() {
 
         stopBtn.setOnClickListener {
             stopService(Intent(this, ScreenCaptureService::class.java))
-            addLog("OCR stopped")
         }
 
         clearBtn.setOnClickListener {
             logs.clear()
-            addLog("Logs cleared")
         }
 
         wm.addView(panel, panelParams)
@@ -253,7 +246,6 @@ class OverlayService : Service() {
         val realH = box.height
 
         if (realW < 250 || realH < 250) {
-            addLog("BOX_SAVE_SKIPPED_SMALL w=$realW h=$realH")
             return
         }
 
@@ -265,8 +257,6 @@ class OverlayService : Service() {
             .putInt("screen_w", metrics.widthPixels)
             .putInt("screen_h", metrics.heightPixels)
             .apply()
-
-        addLog("Box exact saved x=$realX y=$realY w=$realW h=$realH sw=${metrics.widthPixels} sh=${metrics.heightPixels}")
     }
 
     override fun onDestroy() {

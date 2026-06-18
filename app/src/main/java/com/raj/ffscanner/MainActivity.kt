@@ -148,6 +148,7 @@ class MainActivity : Activity() {
 
         if (req == requestCode && res == RESULT_OK && data != null) {
             val serviceIntent = Intent(this, ScreenCaptureService::class.java)
+            serviceIntent.action = ScreenCaptureService.ACTION_START_OCR
             serviceIntent.putExtra("resultCode", res)
             serviceIntent.putExtra("data", data)
             serviceIntent.putExtra("apiUrl", apiInput.text.toString())
