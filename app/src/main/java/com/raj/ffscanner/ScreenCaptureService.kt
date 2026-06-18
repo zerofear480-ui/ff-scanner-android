@@ -33,7 +33,7 @@ class ScreenCaptureService : Service() {
     companion object {
         const val ACTION_START_OCR = "com.raj.ffscanner.START_OCR"
         const val ACTION_STOP_OCR = "com.raj.ffscanner.STOP_OCR"
-        private const val MIN_CAPTURE_INTERVAL_MS = 1000L
+        private const val MIN_CAPTURE_INTERVAL_MS = 500L
     }
 
     private val channelId = "ff_scanner_channel"
@@ -52,7 +52,6 @@ class ScreenCaptureService : Service() {
     private var virtualDisplay: VirtualDisplay? = null
     private var scanRunning = false
     private var scanBusy = false
-    private var lastCaptureTime = 0L
     private var lastCropUploadAt = 0L
     private var apiUrl = "http://13.204.87.106:8000/api/gemini-scan"
 
@@ -140,7 +139,6 @@ class ScreenCaptureService : Service() {
         if (scanRunning) return
         scanRunning = true
         scanBusy = false
-        lastCaptureTime = 0L
         handler.removeCallbacks(scanRunnable)
         OverlayService.addLog("START OCR")
         scanRunnable.run()
@@ -156,33 +154,29 @@ class ScreenCaptureService : Service() {
         }
     }
 
-    private fun scheduleNextScan(delayMs: Long = MIN_CAPTURE_INTERVAL_MS) {
+    private fun scheduleNextScan() {
         if (!scanRunning) return
         handler.removeCallbacks(scanRunnable)
-        handler.postDelayed(scanRunnable, delayMs)
+        OverlayService.addLog("NEXT_SCAN_IN=500")
+        handler.postDelayed(scanRunnable, 500L)
     }
 
     private fun scanLoop() {
-        if (!scanRunning) return
-        captureAndOcr()
-    }
-
-    private fun captureAndOcr() {
         if (!scanRunning) return
         if (scanBusy) {
             scheduleNextScan()
             return
         }
 
-        val now = System.currentTimeMillis()
-        val elapsed = now - lastCaptureTime
-        if (elapsed < MIN_CAPTURE_INTERVAL_MS) {
-            scheduleNextScan(MIN_CAPTURE_INTERVAL_MS - elapsed)
+        scanBusy = true
+        captureAndOcr()
+    }
+
+    private fun captureAndOcr() {
+        if (!scanRunning) {
+            finishCapture()
             return
         }
-
-        scanBusy = true
-        lastCaptureTime = now
 
         try {
             val reader = imageReader ?: run {
@@ -227,25 +221,29 @@ class ScreenCaptureService : Service() {
 
             val cropped = Bitmap.createBitmap(bitmap, x, y, w, h)
 
-            uploadCropDebug(cropped)
-
             val fullImage = InputImage.fromBitmap(cropped, 0)
 
             recognizer.process(fullImage)
                 .addOnSuccessListener { result ->
                     val players = parseStructuredScoreboard(result, cropped.width, cropped.height)
 
+                    val uploadTasks = mutableListOf<(() -> Unit) -> Unit>()
+                    uploadTasks.add { done -> uploadCropDebug(cropped, done) }
 
                     if (players.isNotEmpty()) {
-                        sendPlayers(players)
+                        uploadTasks.add { done -> sendPlayers(players, done) }
                     } else {
                     }
 
-                    sendDebug(
-                        "FULL OCR:\\n${result.text}",
-                        x, y, w, h
-                    )
+                    uploadTasks.add { done ->
+                        sendDebug(
+                            "FULL OCR:\\n${result.text}",
+                            x, y, w, h,
+                            done
+                        )
+                    }
                     OverlayService.addLog("OCR SUCCESS")
+                    startUploads(uploadTasks)
                     finishCapture()
                 }
                 .addOnFailureListener {
@@ -255,14 +253,29 @@ class ScreenCaptureService : Service() {
 
         } catch (e: Exception) {
             OverlayService.addLog("OCR ERROR")
-            sendDebug("CAPTURE_ERROR: ${e.message}", 0, 0, 0, 0)
-            finishCapture()
+            sendDebug("CAPTURE_ERROR: ${e.message}", 0, 0, 0, 0) {
+                finishCapture()
+            }
         }
     }
 
     private fun finishCapture() {
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            handler.post { finishCapture() }
+            return
+        }
+
         scanBusy = false
         scheduleNextScan()
+    }
+
+    private fun startUploads(uploadTasks: List<(() -> Unit) -> Unit>) {
+        uploadTasks.forEach { startUpload ->
+            try {
+                startUpload {}
+            } catch (_: Exception) {
+            }
+        }
     }
 
     private fun parseSlotHeaders(text: String): List<Int> {
@@ -611,9 +624,10 @@ private fun parseNamesOnly(text: String): List<String> {
         }
     }
 
-    private fun uploadCropDebug(cropped: Bitmap) {
+    private fun uploadCropDebug(cropped: Bitmap, onComplete: () -> Unit = {}) {
         val now = System.currentTimeMillis()
-        if (now - lastCropUploadAt < 900L) {
+        if (now - lastCropUploadAt < MIN_CAPTURE_INTERVAL_MS) {
+            onComplete()
             return
         }
         lastCropUploadAt = now
@@ -634,42 +648,51 @@ private fun parseNamesOnly(text: String): List<String> {
             val url = apiUrl.replace("/api/gemini-scan", "/api/gemini-scan")
             val req = Request.Builder().url(url).post(body).build()
 
+            OverlayService.addLog("CAPTURE_SENT timestamp=${System.currentTimeMillis()}")
             client.newCall(req).enqueue(object : Callback {
                 override fun onFailure(call: Call, e: java.io.IOException) {
                     OverlayService.addLog("OCR ERROR")
+                    onComplete()
                 }
 
                 override fun onResponse(call: Call, response: Response) {
-                    OverlayService.addLog("CAPTURE SENT")
                     response.close()
+                    onComplete()
                 }
             })
         } catch (e: Exception) {
             OverlayService.addLog("OCR ERROR")
+            onComplete()
         }
     }
 
-    private fun sendDebug(text: String, x: Int, y: Int, w: Int, h: Int) {
-        val root = JSONObject()
-        root.put("ocr_text", text.take(2000))
-        root.put("players", JSONArray())
-        root.put("box_x", x)
-        root.put("box_y", y)
-        root.put("box_w", w)
-        root.put("box_h", h)
+    private fun sendDebug(text: String, x: Int, y: Int, w: Int, h: Int, onComplete: () -> Unit = {}) {
+        try {
+            val root = JSONObject()
+            root.put("ocr_text", text.take(2000))
+            root.put("players", JSONArray())
+            root.put("box_x", x)
+            root.put("box_y", y)
+            root.put("box_w", w)
+            root.put("box_h", h)
 
-        val debugUrl = apiUrl.replace("/api/gemini-scan", "/api/ocr-debug")
-        val body = root.toString().toRequestBody("application/json".toMediaType())
-        val req = Request.Builder().url(debugUrl).post(body).build()
+            val debugUrl = apiUrl.replace("/api/gemini-scan", "/api/ocr-debug")
+            val body = root.toString().toRequestBody("application/json".toMediaType())
+            val req = Request.Builder().url(debugUrl).post(body).build()
 
-        client.newCall(req).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: java.io.IOException) {
-            }
+            client.newCall(req).enqueue(object : Callback {
+                override fun onFailure(call: Call, e: java.io.IOException) {
+                    onComplete()
+                }
 
-            override fun onResponse(call: Call, response: Response) {
-                response.close()
-            }
-        })
+                override fun onResponse(call: Call, response: Response) {
+                    response.close()
+                    onComplete()
+                }
+            })
+        } catch (_: Exception) {
+            onComplete()
+        }
     }
 
     
@@ -720,31 +743,37 @@ private fun parsePlayers(text: String): List<PlayerData> {
         return players.take(20)
     }
 
-private fun sendPlayers(players: List<PlayerData>) {
-        val arr = JSONArray()
+private fun sendPlayers(players: List<PlayerData>, onComplete: () -> Unit = {}) {
+        try {
+            val arr = JSONArray()
 
-        players.forEach {
-            val obj = JSONObject()
-            obj.put("slot", it.slot)
-            obj.put("name", it.name)
-            obj.put("kills", it.kills)
-            arr.put(obj)
+            players.forEach {
+                val obj = JSONObject()
+                obj.put("slot", it.slot)
+                obj.put("name", it.name)
+                obj.put("kills", it.kills)
+                arr.put(obj)
+            }
+
+            val root = JSONObject()
+            root.put("players", arr)
+
+            val body = root.toString().toRequestBody("application/json".toMediaType())
+            val req = Request.Builder().url(apiUrl).post(body).build()
+
+            client.newCall(req).enqueue(object : Callback {
+                override fun onFailure(call: Call, e: java.io.IOException) {
+                    onComplete()
+                }
+
+                override fun onResponse(call: Call, response: Response) {
+                    response.close()
+                    onComplete()
+                }
+            })
+        } catch (_: Exception) {
+            onComplete()
         }
-
-        val root = JSONObject()
-        root.put("players", arr)
-
-        val body = root.toString().toRequestBody("application/json".toMediaType())
-        val req = Request.Builder().url(apiUrl).post(body).build()
-
-        client.newCall(req).enqueue(object : Callback {
-            override fun onFailure(call: Call, e: java.io.IOException) {
-            }
-
-            override fun onResponse(call: Call, response: Response) {
-                response.close()
-            }
-        })
     }
 
     private fun createChannel() {
