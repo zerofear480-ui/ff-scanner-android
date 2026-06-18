@@ -40,6 +40,7 @@ class ScreenCaptureService : Service() {
     private var imageReader: ImageReader? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var running = false
+    private var lastCropUploadAt = 0L
     private var apiUrl = "http://13.204.87.106:8000/api/gemini-scan"
 
     private val projectionCallback = object : MediaProjection.Callback() {
@@ -126,7 +127,6 @@ class ScreenCaptureService : Service() {
     }
 
     private fun captureAndOcr() {
-        OverlayService.addLog("Capture tick")
 
         try {
             val reader = imageReader ?: run {
@@ -172,14 +172,9 @@ class ScreenCaptureService : Service() {
             val w = (savedW * scaleX).toInt().coerceAtLeast(100).coerceAtMost(bitmap.width - x)
             val h = (savedH * scaleY).toInt().coerceAtLeast(100).coerceAtMost(bitmap.height - y)
 
-            OverlayService.addLog("Saved box x=$savedX y=$savedY w=$savedW h=$savedH")
-            OverlayService.addLog("Bitmap ${bitmap.width}x${bitmap.height} savedScreen ${savedScreenW}x${savedScreenH}")
-            OverlayService.addLog("Scale sx=$scaleX sy=$scaleY")
-            OverlayService.addLog("Crop x=$x y=$y w=$w h=$h")
 
             val cropped = Bitmap.createBitmap(bitmap, x, y, w, h)
 
-            OverlayService.addLog("Local crop save disabled")
 
             OverlayService.addLog("SEND_CROP w=${cropped.width} h=${cropped.height}")
         uploadCropDebug(cropped)
@@ -194,16 +189,12 @@ class ScreenCaptureService : Service() {
                 .addOnSuccessListener { result ->
                     val players = parseStructuredScoreboard(result, cropped.width, cropped.height)
 
-                    OverlayService.addLog("Structured players=${players.size}")
 
                     if (players.isNotEmpty()) {
                         val slotLog = players.map { it.slot }.distinct().joinToString(",")
                         val killLog = players.joinToString(",") { it.kills.toString() }
-                        OverlayService.addLog("Slots=$slotLog")
-                        OverlayService.addLog("Kills=$killLog")
                         sendPlayers(players)
                     } else {
-                        OverlayService.addLog("No structured players")
                     }
 
                     sendDebug(
@@ -574,6 +565,12 @@ private fun parseNamesOnly(text: String): List<String> {
     }
 
     private fun uploadCropDebug(cropped: Bitmap) {
+        val now = System.currentTimeMillis()
+        if (now - lastCropUploadAt < 900L) {
+            return
+        }
+        lastCropUploadAt = now
+
         try {
             val bos = ByteArrayOutputStream()
             cropped.compress(Bitmap.CompressFormat.PNG, 100, bos)
