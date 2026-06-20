@@ -37,7 +37,7 @@ class MainActivity : Activity() {
         status.textSize = 17f
 
         apiInput = EditText(this)
-        apiInput.setText("http://13.204.87.106:8000/api/ocr-scan")
+        apiInput.setText("http://13.203.102.124:8000/api/ocr-scan")
 
         val overlayPermissionBtn = Button(this)
         overlayPermissionBtn.text = "ALLOW FLOATING BOX PERMISSION"
