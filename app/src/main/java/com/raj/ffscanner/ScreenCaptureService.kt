@@ -30,9 +30,7 @@ class ScreenCaptureService : Service() {
     companion object {
         const val ACTION_START_OCR = "com.raj.ffscanner.START_OCR"
         const val ACTION_STOP_OCR = "com.raj.ffscanner.STOP_OCR"
-        private const val MIN_CAPTURE_INTERVAL_MS = 500L
-        private const val SCAN_BUSY_FORCE_RESET_MS = 2000L
-        private const val SCAN_BUSY_WATCHDOG_MS = 1000L
+        private const val CAPTURE_INTERVAL_MS = 1000L
         private const val NO_CAPTURE_RESTART_MS = 3000L
         private const val MAX_CONTINUOUS_NULL_IMAGES = 3
     }
@@ -52,13 +50,11 @@ class ScreenCaptureService : Service() {
     private var virtualDisplay: VirtualDisplay? = null
     private var scanRunning = false
     private var scanBusy = false
-    private var scanBusySinceMs = 0L
     private var lastFrameMs = 0L
     private var lastPipelineRestartMs = 0L
     private var continuousNullImages = 0
     private var nextScanId = 0L
     private var activeScanId = 0L
-    private var watchdogRunnable: Runnable? = null
     private var lastCropUploadAt = 0L
     private var apiUrl = "http://13.203.102.124:8000/api/ocr-scan"
 
@@ -174,7 +170,6 @@ class ScreenCaptureService : Service() {
         if (scanRunning) return
         scanRunning = true
         scanBusy = false
-        scanBusySinceMs = 0L
         lastFrameMs = System.currentTimeMillis()
         continuousNullImages = 0
         handler.removeCallbacks(scanRunnable)
@@ -186,9 +181,6 @@ class ScreenCaptureService : Service() {
         val wasRunning = scanRunning || scanBusy
         scanRunning = false
         scanBusy = false
-        scanBusySinceMs = 0L
-        watchdogRunnable?.let { handler.removeCallbacks(it) }
-        watchdogRunnable = null
         handler.removeCallbacks(scanRunnable)
         if (logStop && wasRunning) {
             OverlayService.addLog("STOP OCR")
@@ -197,50 +189,25 @@ class ScreenCaptureService : Service() {
 
     private fun scheduleNextScan() {
         if (!scanRunning) return
-        handler.removeCallbacks(scanRunnable)
-        OverlayService.addLog("NEXT_SCAN_IN=500")
-        handler.postDelayed(scanRunnable, 500L)
+        handler.postDelayed(scanRunnable, CAPTURE_INTERVAL_MS)
     }
 
     private fun scanLoop() {
         if (!scanRunning) return
+        scheduleNextScan()
+        val tickMs = System.currentTimeMillis()
+        OverlayService.addLog("CAPTURE_TICK ts=$tickMs")
         if (scanBusy) {
-            val busyForMs = System.currentTimeMillis() - scanBusySinceMs
-            if (busyForMs > SCAN_BUSY_FORCE_RESET_MS) {
-                OverlayService.addLog("SCAN_BUSY_FORCE_RESET")
-                watchdogRunnable?.let { handler.removeCallbacks(it) }
-                watchdogRunnable = null
-                scanBusy = false
-                scanBusySinceMs = 0L
-            }
-            scheduleNextScan()
             return
         }
 
         val scanId = ++nextScanId
         activeScanId = scanId
         scanBusy = true
-        scanBusySinceMs = System.currentTimeMillis()
-        OverlayService.addLog("SCAN_START id=$scanId")
-        startScanWatchdog(scanId)
-        captureAndOcr(scanId)
+        captureAndOcr(scanId, tickMs)
     }
 
-    private fun startScanWatchdog(scanId: Long) {
-        watchdogRunnable?.let { handler.removeCallbacks(it) }
-        val runnable = Runnable {
-            if (scanRunning && scanBusy && activeScanId == scanId) {
-                OverlayService.addLog("SCAN_BUSY_FORCE_RESET")
-                scanBusy = false
-                scanBusySinceMs = 0L
-                scheduleNextScan()
-            }
-        }
-        watchdogRunnable = runnable
-        handler.postDelayed(runnable, SCAN_BUSY_WATCHDOG_MS)
-    }
-
-    private fun captureAndOcr(scanId: Long) {
+    private fun captureAndOcr(scanId: Long, captureStartMs: Long) {
         if (!scanRunning) {
             finishCapture(scanId)
             return
@@ -300,11 +267,15 @@ class ScreenCaptureService : Service() {
             val h = savedH.coerceAtLeast(1).coerceAtMost(captureHeight - y)
 
             val cropped = Bitmap.createBitmap(bitmap, x, y, w, h)
-            uploadCropDebug(cropped, scanId)
+            val bos = ByteArrayOutputStream()
+            cropped.compress(Bitmap.CompressFormat.JPEG, 55, bos)
+            val bytes = bos.toByteArray()
+            OverlayService.addLog("CAPTURE_DONE ms=${System.currentTimeMillis() - captureStartMs} bytes=${bytes.size}")
+            uploadCropDebug(bytes)
             finishCapture(scanId)
 
         } catch (e: Exception) {
-            OverlayService.addLog("UPLOAD_FAIL id=$scanId error=${e.message ?: "unknown"}")
+            OverlayService.addLog("UPLOAD_ERROR error=${e.message ?: "unknown"}")
             finishCapture(scanId)
         }
     }
@@ -316,11 +287,7 @@ class ScreenCaptureService : Service() {
         }
 
         if (scanId != null && scanId != activeScanId) return
-        watchdogRunnable?.let { handler.removeCallbacks(it) }
-        watchdogRunnable = null
         scanBusy = false
-        scanBusySinceMs = 0L
-        scheduleNextScan()
     }
 
     private fun startUploads(uploadTasks: List<(() -> Unit) -> Unit>, scanId: Long) {
@@ -680,12 +647,8 @@ private fun parseNamesOnly(text: String): List<String> {
         }
     }
 
-    private fun uploadCropDebug(cropped: Bitmap, scanId: Long) {
+    private fun uploadCropDebug(bytes: ByteArray) {
         try {
-            val bos = ByteArrayOutputStream()
-            cropped.compress(Bitmap.CompressFormat.JPEG, 55, bos)
-            val bytes = bos.toByteArray()
-
             val body = MultipartBody.Builder()
                 .setType(MultipartBody.FORM)
                 .addFormDataPart(
@@ -697,20 +660,21 @@ private fun parseNamesOnly(text: String): List<String> {
 
             val req = Request.Builder().url(apiUrl).post(body).build()
 
+            OverlayService.addLog("UPLOAD_START ts=${System.currentTimeMillis()} bytes=${bytes.size}")
+            val uploadStartMs = System.currentTimeMillis()
             client.newCall(req).enqueue(object : Callback {
                 override fun onFailure(call: Call, e: java.io.IOException) {
-                    OverlayService.addLog("UPLOAD_FAIL id=$scanId error=${e.message ?: "unknown"}")
+                    OverlayService.addLog("UPLOAD_ERROR error=${e.message ?: "unknown"}")
                 }
 
                 override fun onResponse(call: Call, response: Response) {
                     val code = response.code
                     response.close()
-                    OverlayService.addLog("UPLOAD_OK id=$scanId code=$code")
+                    OverlayService.addLog("UPLOAD_DONE ms=${System.currentTimeMillis() - uploadStartMs} code=$code")
                 }
             })
-            OverlayService.addLog("CAPTURE_SENT id=$scanId bytes=${bytes.size}")
         } catch (e: Exception) {
-            OverlayService.addLog("UPLOAD_FAIL id=$scanId error=${e.message ?: "unknown"}")
+            OverlayService.addLog("UPLOAD_ERROR error=${e.message ?: "unknown"}")
         }
     }
 
