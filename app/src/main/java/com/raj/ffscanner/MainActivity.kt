@@ -132,6 +132,11 @@ class MainActivity : Activity() {
         layout.addView(hideBoxBtn)
         layout.addView(startBtn)
         layout.addView(stopBtn)
+
+        val versionText = TextView(this)
+        versionText.text = "APP_VERSION_LABEL_20260625_1015"
+        versionText.textSize = 12f
+        layout.addView(versionText)
         layout.addView(accessibilityBtn)
 
         setContentView(layout)
