@@ -191,7 +191,7 @@ class OverlayService : Service() {
         row.addView(clearBtn)
 
         logView = TextView(this)
-        logView.textSize = 11f
+        logView.textSize = 13f
         logView.setTextColor(Color.WHITE)
         logView.text = "Logs..."
         logView.setPadding(8, 8, 8, 8)
@@ -204,13 +204,13 @@ class OverlayService : Service() {
             logScroll,
             LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
-                260
+                520
             )
         )
 
         panelParams = WindowManager.LayoutParams(
-            650,
-            420,
+            680,
+            760,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
