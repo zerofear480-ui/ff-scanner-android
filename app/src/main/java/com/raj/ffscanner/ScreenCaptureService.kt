@@ -658,19 +658,37 @@ private fun parseNamesOnly(text: String): List<String> {
                 )
                 .build()
 
-            val req = Request.Builder().url(apiUrl).post(body).build()
+            val scanId = System.currentTimeMillis().toString()
+            val req = Request.Builder()
+                .url(apiUrl)
+                .addHeader("X-Scan-Id", scanId)
+                .post(body)
+                .build()
 
-            OverlayService.addLog("UPLOAD_START ts=${System.currentTimeMillis()} bytes=${bytes.size}")
             val uploadStartMs = System.currentTimeMillis()
+            OverlayService.addLog("UPLOAD_START id=$scanId ts=$uploadStartMs bytes=${bytes.size}")
+
             client.newCall(req).enqueue(object : Callback {
                 override fun onFailure(call: Call, e: java.io.IOException) {
-                    OverlayService.addLog("UPLOAD_ERROR error=${e.message ?: "unknown"}")
+                    OverlayService.addLog("UPLOAD_ERROR id=$scanId totalMs=${System.currentTimeMillis() - uploadStartMs} error=${e.message ?: "unknown"}")
                 }
 
                 override fun onResponse(call: Call, response: Response) {
+                    val headerMs = System.currentTimeMillis() - uploadStartMs
                     val code = response.code
+                    val bodyStartMs = System.currentTimeMillis()
+                    val responseText = try {
+                        response.body?.string() ?: ""
+                    } catch (e: Exception) {
+                        ""
+                    }
+                    val bodyReadMs = System.currentTimeMillis() - bodyStartMs
                     response.close()
-                    OverlayService.addLog("UPLOAD_DONE ms=${System.currentTimeMillis() - uploadStartMs} code=$code")
+                    val totalMs = System.currentTimeMillis() - uploadStartMs
+
+                    OverlayService.addLog("UPLOAD_HEADERS id=$scanId headerMs=$headerMs code=$code")
+                    OverlayService.addLog("UPLOAD_BODY id=$scanId bodyReadMs=$bodyReadMs respBytes=${responseText.length}")
+                    OverlayService.addLog("UPLOAD_DONE id=$scanId totalMs=$totalMs code=$code bytes=${bytes.size}")
                 }
             })
         } catch (e: Exception) {

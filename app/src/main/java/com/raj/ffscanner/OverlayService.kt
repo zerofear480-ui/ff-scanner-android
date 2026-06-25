@@ -167,7 +167,16 @@ class OverlayService : Service() {
         logView.setPadding(8, 8, 8, 8)
 
         panel.addView(row)
-        panel.addView(logView)
+
+        val logScroll = android.widget.ScrollView(this)
+        logScroll.addView(logView)
+        panel.addView(
+            logScroll,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                260
+            )
+        )
 
         panelParams = WindowManager.LayoutParams(
             650,
@@ -220,6 +229,7 @@ class OverlayService : Service() {
 
         clearBtn.setOnClickListener {
             logs.clear()
+            logView.text = ""
         }
 
         wm.addView(panel, panelParams)
@@ -227,7 +237,10 @@ class OverlayService : Service() {
         handler.post(object : Runnable {
             override fun run() {
                 logView.text = logs.joinToString("\n")
-                handler.postDelayed(this, 1000)
+                logScroll.post {
+                    logScroll.fullScroll(android.view.View.FOCUS_DOWN)
+                }
+                handler.postDelayed(this, 500)
             }
         })
     }
