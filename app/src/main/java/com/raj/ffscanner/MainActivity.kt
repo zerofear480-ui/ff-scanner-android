@@ -133,8 +133,6 @@ class MainActivity : Activity() {
         layout.addView(startBtn)
         layout.addView(stopBtn)
         layout.addView(accessibilityBtn)
-        layout.addView(startScrollBtn)
-        layout.addView(stopScrollBtn)
 
         setContentView(layout)
 
