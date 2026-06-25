@@ -12,6 +12,8 @@ import android.media.projection.MediaProjectionManager
 import android.widget.*
 
 class MainActivity : Activity() {
+    private var pendingAutoScrollFromOverlay = false
+
 
     private val requestCode = 1001
     private lateinit var status: TextView
@@ -136,6 +138,8 @@ class MainActivity : Activity() {
 
         setContentView(layout)
 
+        pendingAutoScrollFromOverlay = intent?.getBooleanExtra("auto_start_scroll", false) == true
+
         if (intent?.getBooleanExtra("auto_start_ocr", false) == true) {
             status.text = "Status: Auto starting OCR..."
             val manager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
@@ -157,6 +161,8 @@ class MainActivity : Activity() {
                 startForegroundService(serviceIntent)
             } else {
                 startService(serviceIntent)
+        startPendingAutoScrollIfNeeded()
+        // AUTO_SCROLL_HELPER_CALL_ADDED
             }
 
             if (Settings.canDrawOverlays(this)) {
@@ -168,4 +174,14 @@ class MainActivity : Activity() {
             status.text = "Status: Permission denied"
         }
     }
+
+    private fun startPendingAutoScrollIfNeeded() {
+        if (!pendingAutoScrollFromOverlay) return
+        val svc = AutoScrollAccessibilityService.instance
+        if (svc != null) {
+            svc.startAutoScroll()
+            pendingAutoScrollFromOverlay = false
+        }
+    }
+
 }

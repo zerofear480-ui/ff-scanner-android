@@ -1,5 +1,7 @@
 package com.raj.ffscanner
 
+import android.graphics.Rect
+
 import android.app.Service
 import android.content.Intent
 import android.graphics.Color
@@ -12,14 +14,30 @@ import android.view.*
 import android.widget.*
 
 class OverlayService : Service() {
-
     companion object {
+        var instance: OverlayService? = null
         val logs = mutableListOf<String>()
+
+
+
+        fun getBoxRect(): Rect? {
+            val svc = instance ?: return null
+            return try {
+                Rect(
+                    svc.boxParams.x,
+                    svc.boxParams.y,
+                    svc.boxParams.x + svc.boxParams.width,
+                    svc.boxParams.y + svc.boxParams.height
+                )
+            } catch (_: Exception) {
+                null
+            }
+        }
 
         fun addLog(msg: String) {
             val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
-            logs.add(0, "[$time] $msg")
-            if (logs.size > 25) logs.removeAt(logs.size - 1)
+            logs.add("[$time] $msg")
+            if (logs.size > 250) logs.removeAt(0)
         }
     }
 
@@ -34,6 +52,7 @@ class OverlayService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         wm = getSystemService(WINDOW_SERVICE) as WindowManager
 
         createOcrBox()
@@ -147,8 +166,17 @@ class OverlayService : Service() {
         val row = LinearLayout(this)
         row.orientation = LinearLayout.HORIZONTAL
 
+        val ocrCheck = CheckBox(this)
+        ocrCheck.text = "OCR"
+        ocrCheck.setTextColor(Color.WHITE)
+        ocrCheck.isChecked = true
+
+        val autoScrollCheck = CheckBox(this)
+        autoScrollCheck.text = "AUTO SCROLL"
+        autoScrollCheck.setTextColor(Color.WHITE)
+
         val startBtn = Button(this)
-        startBtn.text = "START OCR"
+        startBtn.text = "START"
 
         val stopBtn = Button(this)
         stopBtn.text = "STOP"
@@ -156,6 +184,8 @@ class OverlayService : Service() {
         val clearBtn = Button(this)
         clearBtn.text = "CLEAR"
 
+        row.addView(ocrCheck)
+        row.addView(autoScrollCheck)
         row.addView(startBtn)
         row.addView(stopBtn)
         row.addView(clearBtn)
@@ -217,10 +247,30 @@ class OverlayService : Service() {
         })
 
         startBtn.setOnClickListener {
+            val ocr = ocrCheck.isChecked
+            val autoScroll = autoScrollCheck.isChecked
+
+            if (!ocr) {
+                addLog("START_BLOCKED enable OCR first")
+                return@setOnClickListener
+            }
+
+            if (autoScroll && AutoScrollAccessibilityService.instance == null) {
+                addLog("AUTO_SCROLL permission required")
+                val accIntent = Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                accIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                startActivity(accIntent)
+                return@setOnClickListener
+            }
+
             val intent = Intent(this, MainActivity::class.java)
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             intent.putExtra("auto_start_ocr", true)
+            intent.putExtra("auto_start_scroll", autoScroll)
             startActivity(intent)
+
+            if (autoScroll) addLog("START mode=OCR+AUTO_SCROLL")
+            else addLog("START mode=OCR_ONLY")
         }
 
         stopBtn.setOnClickListener {
@@ -237,9 +287,6 @@ class OverlayService : Service() {
         handler.post(object : Runnable {
             override fun run() {
                 logView.text = logs.joinToString("\n")
-                logScroll.post {
-                    logScroll.fullScroll(android.view.View.FOCUS_DOWN)
-                }
                 handler.postDelayed(this, 500)
             }
         })
@@ -277,6 +324,7 @@ class OverlayService : Service() {
         try { wm.removeView(box) } catch (_: Exception) {}
         try { wm.removeView(panel) } catch (_: Exception) {}
         super.onDestroy()
+        instance = null
     }
 
     override fun onBind(intent: Intent?): IBinder? = null
