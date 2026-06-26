@@ -4,6 +4,7 @@ import android.Manifest
 import android.app.Activity
 import android.content.Intent
 import android.content.ComponentName
+import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -144,11 +145,6 @@ class MainActivity : Activity() {
                 1f
             )
         )
-
-        val versionText = TextView(this)
-        versionText.text = "Version: v0.8.4 - 2026-06-25 22:45 - AutoScroll Debug"
-        versionText.textSize = 12f
-        layout.addView(versionText)
 
         val version = TextView(this)
         version.text = "Version: v0.8.5 - 2026-06-25 - Underlay AutoScroll Fix"
