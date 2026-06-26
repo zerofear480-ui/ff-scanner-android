@@ -98,6 +98,7 @@ class MainActivity : Activity() {
 
         stopBtn.setOnClickListener {
             stopService(Intent(this, ScreenCaptureService::class.java))
+            AutoScrollAccessibilityService.instance?.stopAutoScroll()
             stopService(Intent(this, OverlayService::class.java))
             status.text = "Status: Scanner stopped"
         }
@@ -132,12 +133,22 @@ class MainActivity : Activity() {
         layout.addView(hideBoxBtn)
         layout.addView(startBtn)
         layout.addView(stopBtn)
+        layout.addView(accessibilityBtn)
+
+        val spacer = Space(this)
+        layout.addView(
+            spacer,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                1f
+            )
+        )
 
         val versionText = TextView(this)
-        versionText.text = "APP_VERSION_LABEL_20260625_1015"
+        versionText.text = "Version: v0.8.4 - 2026-06-25 22:45 - AutoScroll Debug"
         versionText.textSize = 12f
         layout.addView(versionText)
-        layout.addView(accessibilityBtn)
 
         setContentView(layout)
 
@@ -164,8 +175,6 @@ class MainActivity : Activity() {
                 startForegroundService(serviceIntent)
             } else {
                 startService(serviceIntent)
-        startPendingAutoScrollIfNeeded()
-        // AUTO_SCROLL_HELPER_CALL_ADDED
             }
 
             if (Settings.canDrawOverlays(this)) {
@@ -173,6 +182,7 @@ class MainActivity : Activity() {
             }
 
             status.text = "Status: Scanner running"
+            startPendingAutoScrollIfNeeded()
         } else {
             status.text = "Status: Permission denied"
         }
@@ -180,10 +190,15 @@ class MainActivity : Activity() {
 
     private fun startPendingAutoScrollIfNeeded() {
         if (!pendingAutoScrollFromOverlay) return
+        OverlayService.addLog("AUTO_SCROLL_SERVICE_INSTANCE=${AutoScrollAccessibilityService.instance != null}")
         val svc = AutoScrollAccessibilityService.instance
         if (svc != null) {
             svc.startAutoScroll()
             pendingAutoScrollFromOverlay = false
+        } else {
+            OverlayService.addLog("AUTO_SCROLL_PERMISSION_REQUIRED")
+            status.text = "Status: Enable auto scroll permission first"
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
         }
     }
 

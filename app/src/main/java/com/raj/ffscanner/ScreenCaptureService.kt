@@ -33,6 +33,11 @@ class ScreenCaptureService : Service() {
         private const val CAPTURE_INTERVAL_MS = 1000L
         private const val NO_CAPTURE_RESTART_MS = 3000L
         private const val MAX_CONTINUOUS_NULL_IMAGES = 3
+        private var instance: ScreenCaptureService? = null
+
+        fun captureAfterAutoScrollSwipe(): Boolean {
+            return instance?.requestImmediateCapture() == true
+        }
     }
 
     private val channelId = "ff_scanner_channel"
@@ -62,6 +67,11 @@ class ScreenCaptureService : Service() {
         override fun onStop() {
             stopScanning(logStop = true)
         }
+    }
+
+    override fun onCreate() {
+        super.onCreate()
+        instance = this
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -190,6 +200,17 @@ class ScreenCaptureService : Service() {
     private fun scheduleNextScan() {
         if (!scanRunning) return
         handler.postDelayed(scanRunnable, CAPTURE_INTERVAL_MS)
+    }
+
+    private fun requestImmediateCapture(): Boolean {
+        if (!scanRunning) return false
+        handler.post {
+            if (scanRunning && !scanBusy) {
+                handler.removeCallbacks(scanRunnable)
+                scanRunnable.run()
+            }
+        }
+        return true
     }
 
     private fun scanLoop() {
@@ -849,6 +870,7 @@ private fun sendPlayers(players: List<PlayerData>, onComplete: () -> Unit = {}) 
         try { imageReader?.close() } catch (_: Exception) {}
         try { projection?.unregisterCallback(projectionCallback) } catch (_: Exception) {}
         try { projection?.stop() } catch (_: Exception) {}
+        if (instance === this) instance = null
         super.onDestroy()
     }
 

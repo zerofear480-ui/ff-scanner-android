@@ -23,11 +23,15 @@ class OverlayService : Service() {
         fun getBoxRect(): Rect? {
             val svc = instance ?: return null
             return try {
+                val loc = IntArray(2)
+                svc.box.getLocationOnScreen(loc)
+                val width = if (svc.box.width > 0) svc.box.width else svc.boxParams.width
+                val height = if (svc.box.height > 0) svc.box.height else svc.boxParams.height
                 Rect(
-                    svc.boxParams.x,
-                    svc.boxParams.y,
-                    svc.boxParams.x + svc.boxParams.width,
-                    svc.boxParams.y + svc.boxParams.height
+                    loc[0],
+                    loc[1],
+                    loc[0] + width,
+                    loc[1] + height
                 )
             } catch (_: Exception) {
                 null
@@ -249,6 +253,8 @@ class OverlayService : Service() {
         startBtn.setOnClickListener {
             val ocr = ocrCheck.isChecked
             val autoScroll = autoScrollCheck.isChecked
+            addLog("START_CLICK OCR=$ocr AUTO_SCROLL=$autoScroll")
+            addLog("AUTO_SCROLL_SERVICE_INSTANCE=${AutoScrollAccessibilityService.instance != null}")
 
             if (!ocr) {
                 addLog("START_BLOCKED enable OCR first")
@@ -256,7 +262,7 @@ class OverlayService : Service() {
             }
 
             if (autoScroll && AutoScrollAccessibilityService.instance == null) {
-                addLog("AUTO_SCROLL permission required")
+                addLog("AUTO_SCROLL_PERMISSION_REQUIRED")
                 val accIntent = Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)
                 accIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                 startActivity(accIntent)
@@ -275,6 +281,8 @@ class OverlayService : Service() {
 
         stopBtn.setOnClickListener {
             stopService(Intent(this, ScreenCaptureService::class.java))
+            AutoScrollAccessibilityService.instance?.stopAutoScroll()
+            addLog("STOP_CLICK")
         }
 
         clearBtn.setOnClickListener {

@@ -2,7 +2,6 @@ package com.raj.ffscanner
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
-import android.content.Intent
 import android.graphics.Path
 import android.os.Handler
 import android.os.Looper
@@ -24,16 +23,6 @@ class AutoScrollAccessibilityService : AccessibilityService() {
             if (!isRunning) return
 
             performScoreboardSwipe()
-
-            swipeCount++
-
-            // 8 swipe ke baad direction reverse
-            if (swipeCount >= 3) {
-                swipeCount = 0
-                directionDown = !directionDown
-            }
-
-            handler.postDelayed(this, 1000)
         }
     }
 
@@ -53,10 +42,15 @@ class AutoScrollAccessibilityService : AccessibilityService() {
     }
 
     fun startAutoScroll() {
-        if (isRunning) return
+        OverlayService.addLog("AUTO_SCROLL_START_CALLED")
+        if (isRunning) {
+            OverlayService.addLog("AUTO_SCROLL_ALREADY_RUNNING")
+            return
+        }
         isRunning = true
         directionDown = false
         swipeCount = 0
+        OverlayService.addLog("AUTO_SCROLL_RUNNING=true")
         handler.post(scrollTask)
     }
 
@@ -66,39 +60,24 @@ class AutoScrollAccessibilityService : AccessibilityService() {
     }
 
     private fun performScoreboardSwipe() {
-        val display = resources.displayMetrics
-        val screenW = display.widthPixels
-        val screenH = display.heightPixels
         val rect = OverlayService.getBoxRect()
+        val direction = if (!directionDown) "BOTTOM_TO_TOP" else "TOP_TO_BOTTOM"
+        val step = swipeCount + 1
 
-        val x: Float
-        val startY: Float
-        val endY: Float
-
-        if (rect != null && rect.width() > 30 && rect.height() > 30) {
-            x = rect.centerX().toFloat()
-            val topY = rect.top + rect.height() * 0.18f
-            val bottomY = rect.bottom - rect.height() * 0.18f
-
-            if (!directionDown) {
-                startY = bottomY
-                endY = topY
-            } else {
-                startY = topY
-                endY = bottomY
-            }
-        } else {
-            x = screenW * 0.88f
-            if (!directionDown) {
-                startY = screenH * 0.72f
-                endY = screenH * 0.42f
-            } else {
-                startY = screenH * 0.42f
-                endY = screenH * 0.72f
-            }
+        if (rect == null || rect.width() <= 30 || rect.height() <= 30) {
+            OverlayService.addLog("AUTO_SCROLL_RECT x=0 y=0 w=0 h=0")
+            OverlayService.addLog("AUTO_SCROLL_DISPATCH ok=false direction=$direction step=$step/3")
+            scheduleNextSwipe()
+            return
         }
 
-        OverlayService.addLog("AUTO_SCROLL ${if (!directionDown) "BOTTOM_TO_TOP" else "TOP_TO_BOTTOM"} ${swipeCount + 1}/3")
+        OverlayService.addLog("AUTO_SCROLL_RECT x=${rect.left} y=${rect.top} w=${rect.width()} h=${rect.height()}")
+
+        val x = rect.centerX().toFloat()
+        val topY = rect.top + rect.height() * 0.18f
+        val bottomY = rect.bottom - rect.height() * 0.18f
+        val startY = if (!directionDown) bottomY else topY
+        val endY = if (!directionDown) topY else bottomY
 
         val path = Path().apply {
             moveTo(x, startY)
@@ -109,6 +88,42 @@ class AutoScrollAccessibilityService : AccessibilityService() {
             .addStroke(GestureDescription.StrokeDescription(path, 0, 350))
             .build()
 
-        dispatchGesture(gesture, null, null)
+        val ok = dispatchGesture(gesture, object : GestureResultCallback() {
+            override fun onCompleted(gestureDescription: GestureDescription?) {
+                super.onCompleted(gestureDescription)
+                OverlayService.addLog("AUTO_SCROLL_GESTURE_DONE")
+                OverlayService.addLog("AUTO_SCROLL_CAPTURE_AFTER_SWIPE")
+                ScreenCaptureService.captureAfterAutoScrollSwipe()
+                advanceDirection()
+                scheduleNextSwipe()
+            }
+
+            override fun onCancelled(gestureDescription: GestureDescription?) {
+                super.onCancelled(gestureDescription)
+                OverlayService.addLog("AUTO_SCROLL_GESTURE_CANCELLED")
+                advanceDirection()
+                scheduleNextSwipe()
+            }
+        }, null)
+        OverlayService.addLog("AUTO_SCROLL_DISPATCH ok=$ok direction=$direction step=$step/3")
+
+        if (!ok) {
+            advanceDirection()
+            scheduleNextSwipe()
+        }
+    }
+
+    private fun advanceDirection() {
+        swipeCount++
+        if (swipeCount >= 3) {
+            swipeCount = 0
+            directionDown = !directionDown
+        }
+    }
+
+    private fun scheduleNextSwipe() {
+        if (!isRunning) return
+        handler.removeCallbacks(scrollTask)
+        handler.postDelayed(scrollTask, 1000)
     }
 }
