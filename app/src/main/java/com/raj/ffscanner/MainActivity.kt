@@ -150,6 +150,13 @@ class MainActivity : Activity() {
         versionText.textSize = 12f
         layout.addView(versionText)
 
+        val version = TextView(this)
+        version.text = "Version: v0.8.5 - 2026-06-25 - Underlay AutoScroll Fix"
+        version.textSize = 12f
+        version.setTextColor(Color.GRAY)
+        version.setPadding(0,24,0,0)
+        layout.addView(version)
+
         setContentView(layout)
 
         pendingAutoScrollFromOverlay = intent?.getBooleanExtra("auto_start_scroll", false) == true

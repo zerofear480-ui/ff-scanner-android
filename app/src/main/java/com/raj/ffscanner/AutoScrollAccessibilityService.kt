@@ -57,6 +57,7 @@ class AutoScrollAccessibilityService : AccessibilityService() {
     fun stopAutoScroll() {
         isRunning = false
         handler.removeCallbacks(scrollTask)
+        OverlayService.setOcrBoxTouchEnabled(true)
     }
 
     private fun performScoreboardSwipe() {
@@ -74,8 +75,8 @@ class AutoScrollAccessibilityService : AccessibilityService() {
         OverlayService.addLog("AUTO_SCROLL_RECT x=${rect.left} y=${rect.top} w=${rect.width()} h=${rect.height()}")
 
         val x = rect.centerX().toFloat()
-        val topY = rect.top + rect.height() * 0.18f
-        val bottomY = rect.bottom - rect.height() * 0.18f
+        val topY = rect.top + rect.height() * 0.10f
+        val bottomY = rect.bottom - rect.height() * 0.10f
         val startY = if (!directionDown) bottomY else topY
         val endY = if (!directionDown) topY else bottomY
 
@@ -88,29 +89,47 @@ class AutoScrollAccessibilityService : AccessibilityService() {
             .addStroke(GestureDescription.StrokeDescription(path, 0, 350))
             .build()
 
-        val ok = dispatchGesture(gesture, object : GestureResultCallback() {
-            override fun onCompleted(gestureDescription: GestureDescription?) {
-                super.onCompleted(gestureDescription)
-                OverlayService.addLog("AUTO_SCROLL_GESTURE_DONE")
-                OverlayService.addLog("AUTO_SCROLL_CAPTURE_AFTER_SWIPE")
-                ScreenCaptureService.captureAfterAutoScrollSwipe()
+        OverlayService.addLog("AUTO_SCROLL_TOUCH_MODE=UNDERLAY")
+        OverlayService.setOcrBoxTouchEnabled(false)
+
+        handler.postDelayed({
+            if (!isRunning) {
+                OverlayService.setOcrBoxTouchEnabled(true)
+                return@postDelayed
+            }
+
+            val ok = try {
+                dispatchGesture(gesture, object : GestureResultCallback() {
+                    override fun onCompleted(gestureDescription: GestureDescription?) {
+                        super.onCompleted(gestureDescription)
+                        OverlayService.addLog("AUTO_SCROLL_GESTURE_DONE")
+                        OverlayService.setOcrBoxTouchEnabled(true)
+                        OverlayService.addLog("AUTO_SCROLL_CAPTURE_AFTER_SWIPE")
+                        ScreenCaptureService.captureAfterAutoScrollSwipe()
+                        advanceDirection()
+                        scheduleNextSwipe()
+                    }
+
+                    override fun onCancelled(gestureDescription: GestureDescription?) {
+                        super.onCancelled(gestureDescription)
+                        OverlayService.addLog("AUTO_SCROLL_GESTURE_CANCELLED")
+                        OverlayService.setOcrBoxTouchEnabled(true)
+                        advanceDirection()
+                        scheduleNextSwipe()
+                    }
+                }, null)
+            } catch (e: Exception) {
+                OverlayService.addLog("AUTO_SCROLL_DISPATCH_ERROR error=${e.message ?: "unknown"}")
+                false
+            }
+            OverlayService.addLog("AUTO_SCROLL_DISPATCH ok=$ok direction=$direction step=$step/3")
+
+            if (!ok) {
+                OverlayService.setOcrBoxTouchEnabled(true)
                 advanceDirection()
                 scheduleNextSwipe()
             }
-
-            override fun onCancelled(gestureDescription: GestureDescription?) {
-                super.onCancelled(gestureDescription)
-                OverlayService.addLog("AUTO_SCROLL_GESTURE_CANCELLED")
-                advanceDirection()
-                scheduleNextSwipe()
-            }
-        }, null)
-        OverlayService.addLog("AUTO_SCROLL_DISPATCH ok=$ok direction=$direction step=$step/3")
-
-        if (!ok) {
-            advanceDirection()
-            scheduleNextSwipe()
-        }
+        }, 50)
     }
 
     private fun advanceDirection() {

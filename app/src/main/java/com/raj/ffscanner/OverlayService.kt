@@ -38,6 +38,11 @@ class OverlayService : Service() {
             }
         }
 
+        fun setOcrBoxTouchEnabled(enabled: Boolean) {
+            val svc = instance ?: return
+            svc.setOcrBoxTouchEnabledInternal(enabled)
+        }
+
         fun addLog(msg: String) {
             val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
             logs.add("[$time] $msg")
@@ -298,6 +303,27 @@ class OverlayService : Service() {
                 handler.postDelayed(this, 500)
             }
         })
+    }
+
+    private fun setOcrBoxTouchEnabledInternal(enabled: Boolean) {
+        val notTouchableFlag = WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+        val touchDisabled = (boxParams.flags and notTouchableFlag) != 0
+
+        if (enabled && touchDisabled) {
+            boxParams.flags = boxParams.flags and notTouchableFlag.inv()
+        } else if (!enabled && !touchDisabled) {
+            boxParams.flags = boxParams.flags or notTouchableFlag
+        } else {
+            addLog(if (enabled) "OVERLAY_TOUCH_ENABLED" else "OVERLAY_TOUCH_DISABLED")
+            return
+        }
+
+        try {
+            wm.updateViewLayout(box, boxParams)
+            addLog(if (enabled) "OVERLAY_TOUCH_ENABLED" else "OVERLAY_TOUCH_DISABLED")
+        } catch (e: Exception) {
+            addLog("OVERLAY_TOUCH_UPDATE_FAILED error=${e.message ?: "unknown"}")
+        }
     }
 
     private fun saveBox() {
