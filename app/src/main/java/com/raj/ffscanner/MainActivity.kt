@@ -173,6 +173,7 @@ class MainActivity : Activity() {
             serviceIntent.putExtra("resultCode", res)
             serviceIntent.putExtra("data", data)
             serviceIntent.putExtra("apiUrl", apiInput.text.toString())
+            serviceIntent.putExtra(ScreenCaptureService.EXTRA_AUTO_SCROLL_ENABLED, pendingAutoScrollFromOverlay)
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(serviceIntent)
@@ -185,7 +186,7 @@ class MainActivity : Activity() {
             }
 
             status.text = "Status: Scanner running"
-            startPendingAutoScrollIfNeeded()
+            pendingAutoScrollFromOverlay = false
         } else {
             status.text = "Status: Permission denied"
         }

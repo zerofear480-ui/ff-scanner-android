@@ -30,14 +30,11 @@ class ScreenCaptureService : Service() {
     companion object {
         const val ACTION_START_OCR = "com.raj.ffscanner.START_OCR"
         const val ACTION_STOP_OCR = "com.raj.ffscanner.STOP_OCR"
+        const val EXTRA_AUTO_SCROLL_ENABLED = "auto_scroll_enabled"
         private const val CAPTURE_INTERVAL_MS = 1000L
         private const val NO_CAPTURE_RESTART_MS = 3000L
         private const val MAX_CONTINUOUS_NULL_IMAGES = 3
         private var instance: ScreenCaptureService? = null
-
-        fun captureAfterAutoScrollSwipe(): Boolean {
-            return instance?.requestImmediateCapture() == true
-        }
     }
 
     private val channelId = "ff_scanner_channel"
@@ -61,6 +58,7 @@ class ScreenCaptureService : Service() {
     private var nextScanId = 0L
     private var activeScanId = 0L
     private var lastCropUploadAt = 0L
+    private var autoScrollEnabled = false
     private var apiUrl = "http://13.203.102.124:8000/api/ocr-scan"
 
     private val projectionCallback = object : MediaProjection.Callback() {
@@ -92,6 +90,7 @@ class ScreenCaptureService : Service() {
 
         when (intent?.action) {
             ACTION_START_OCR -> {
+                autoScrollEnabled = intent.getBooleanExtra(EXTRA_AUTO_SCROLL_ENABLED, false)
                 val resultCode = intent.getIntExtra("resultCode", Activity.RESULT_CANCELED)
 
                 val data = if (Build.VERSION.SDK_INT >= 33) {
@@ -195,6 +194,7 @@ class ScreenCaptureService : Service() {
         if (logStop && wasRunning) {
             OverlayService.addLog("STOP OCR")
         }
+        AutoScrollAccessibilityService.instance?.stopBackendAutoScroll()
     }
 
     private fun scheduleNextScan() {
@@ -202,20 +202,8 @@ class ScreenCaptureService : Service() {
         handler.postDelayed(scanRunnable, CAPTURE_INTERVAL_MS)
     }
 
-    private fun requestImmediateCapture(): Boolean {
-        if (!scanRunning) return false
-        handler.post {
-            if (scanRunning && !scanBusy) {
-                handler.removeCallbacks(scanRunnable)
-                scanRunnable.run()
-            }
-        }
-        return true
-    }
-
     private fun scanLoop() {
         if (!scanRunning) return
-        scheduleNextScan()
         val tickMs = System.currentTimeMillis()
         OverlayService.addLog("CAPTURE_TICK ts=$tickMs")
         if (scanBusy) {
@@ -292,8 +280,7 @@ class ScreenCaptureService : Service() {
             cropped.compress(Bitmap.CompressFormat.JPEG, 55, bos)
             val bytes = bos.toByteArray()
             OverlayService.addLog("CAPTURE_DONE ms=${System.currentTimeMillis() - captureStartMs} bytes=${bytes.size}")
-            uploadCropDebug(bytes)
-            finishCapture(scanId)
+            uploadCropDebug(bytes, scanId) { finishCapture(scanId) }
 
         } catch (e: Exception) {
             OverlayService.addLog("UPLOAD_ERROR error=${e.message ?: "unknown"}")
@@ -309,6 +296,72 @@ class ScreenCaptureService : Service() {
 
         if (scanId != null && scanId != activeScanId) return
         scanBusy = false
+        if (scanRunning) {
+            OverlayService.addLog("NEXT_CAPTURE_ALLOWED")
+            scheduleNextScan()
+        }
+    }
+
+    private fun handleBackendAutoScrollDecision(responseText: String, onComplete: () -> Unit) {
+        if (!autoScrollEnabled) {
+            onComplete()
+            return
+        }
+
+        val decision = parseAutoScrollDecision(responseText)
+        OverlayService.addLog("BACKEND_DECISION shouldScroll=${decision.shouldScroll} reason=${decision.reason}")
+
+        if (decision.endReached) {
+            OverlayService.addLog("AUTO_SCROLL_END_REACHED")
+            autoScrollEnabled = false
+            AutoScrollAccessibilityService.instance?.stopBackendAutoScroll()
+            onComplete()
+            return
+        }
+
+        if (!decision.shouldScroll) {
+            OverlayService.addLog("AUTO_SCROLL_SKIP reason=${decision.reason}")
+            onComplete()
+            return
+        }
+
+        val service = AutoScrollAccessibilityService.instance
+        if (service == null) {
+            OverlayService.addLog("AUTO_SCROLL_SKIP reason=accessibility_service_missing")
+            onComplete()
+            return
+        }
+
+        OverlayService.addLog("AUTO_SCROLL_EXECUTE direction=BOTTOM_TO_TOP")
+        service.performBackendSwipeUp {
+            onComplete()
+        }
+    }
+
+    private fun parseAutoScrollDecision(responseText: String): AutoScrollDecision {
+        return try {
+            val root = JSONObject(responseText)
+            val autoScroll = root.optJSONObject("autoScroll")
+            if (autoScroll == null) {
+                AutoScrollDecision(
+                    shouldScroll = false,
+                    endReached = false,
+                    reason = "missing_autoScroll"
+                )
+            } else {
+                AutoScrollDecision(
+                    shouldScroll = autoScroll.optBoolean("shouldScroll", false),
+                    endReached = autoScroll.optBoolean("endReached", false),
+                    reason = autoScroll.optString("reason", "none").ifBlank { "none" }
+                )
+            }
+        } catch (e: Exception) {
+            AutoScrollDecision(
+                shouldScroll = false,
+                endReached = false,
+                reason = "parse_error"
+            )
+        }
     }
 
     private fun startUploads(uploadTasks: List<(() -> Unit) -> Unit>, scanId: Long) {
@@ -668,7 +721,7 @@ private fun parseNamesOnly(text: String): List<String> {
         }
     }
 
-    private fun uploadCropDebug(bytes: ByteArray) {
+    private fun uploadCropDebug(bytes: ByteArray, activeScanId: Long, onComplete: () -> Unit) {
         try {
             val body = MultipartBody.Builder()
                 .setType(MultipartBody.FORM)
@@ -688,10 +741,19 @@ private fun parseNamesOnly(text: String): List<String> {
 
             val uploadStartMs = System.currentTimeMillis()
             OverlayService.addLog("UPLOAD_START id=$scanId ts=$uploadStartMs bytes=${bytes.size}")
+            OverlayService.addLog("UPLOAD_WAIT_RESPONSE")
 
             client.newCall(req).enqueue(object : Callback {
                 override fun onFailure(call: Call, e: java.io.IOException) {
                     OverlayService.addLog("UPLOAD_ERROR id=$scanId totalMs=${System.currentTimeMillis() - uploadStartMs} error=${e.message ?: "unknown"}")
+                    handler.post {
+                        if (activeScanId == this@ScreenCaptureService.activeScanId) {
+                            if (autoScrollEnabled) {
+                                OverlayService.addLog("AUTO_SCROLL_SKIP reason=upload_error")
+                            }
+                            onComplete()
+                        }
+                    }
                 }
 
                 override fun onResponse(call: Call, response: Response) {
@@ -710,10 +772,16 @@ private fun parseNamesOnly(text: String): List<String> {
                     OverlayService.addLog("UPLOAD_HEADERS id=$scanId headerMs=$headerMs code=$code")
                     OverlayService.addLog("UPLOAD_BODY id=$scanId bodyReadMs=$bodyReadMs respBytes=${responseText.length}")
                     OverlayService.addLog("UPLOAD_DONE id=$scanId totalMs=$totalMs code=$code bytes=${bytes.size}")
+                    handler.post {
+                        if (activeScanId == this@ScreenCaptureService.activeScanId) {
+                            handleBackendAutoScrollDecision(responseText, onComplete)
+                        }
+                    }
                 }
             })
         } catch (e: Exception) {
             OverlayService.addLog("UPLOAD_ERROR error=${e.message ?: "unknown"}")
+            onComplete()
         }
     }
 
@@ -877,6 +945,11 @@ private fun sendPlayers(players: List<PlayerData>, onComplete: () -> Unit = {}) 
     override fun onBind(intent: Intent?) = null
 
     data class PlayerData(val slot: Int, val name: String, val kills: Int)
+    data class AutoScrollDecision(
+        val shouldScroll: Boolean,
+        val endReached: Boolean,
+        val reason: String
+    )
 }
 
 data class NameY(
