@@ -1,24 +1,28 @@
 package com.raj.ffscanner
 
-import android.graphics.Rect
-
 import android.app.Service
 import android.content.Intent
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.Rect
 import android.graphics.drawable.GradientDrawable
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.view.*
-import android.widget.*
+import android.view.Gravity
+import android.view.MotionEvent
+import android.view.View
+import android.view.WindowManager
+import android.widget.Button
+import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.ScrollView
+import android.widget.TextView
 
 class OverlayService : Service() {
     companion object {
         var instance: OverlayService? = null
-        val logs = mutableListOf<String>()
-
-
+        private val logs = mutableListOf<String>()
 
         fun getBoxRect(): Rect? {
             val svc = instance ?: return null
@@ -27,26 +31,35 @@ class OverlayService : Service() {
                 svc.box.getLocationOnScreen(loc)
                 val width = if (svc.box.width > 0) svc.box.width else svc.boxParams.width
                 val height = if (svc.box.height > 0) svc.box.height else svc.boxParams.height
-                Rect(
-                    loc[0],
-                    loc[1],
-                    loc[0] + width,
-                    loc[1] + height
-                )
+                Rect(loc[0], loc[1], loc[0] + width, loc[1] + height)
             } catch (_: Exception) {
                 null
             }
         }
 
         fun setOcrBoxTouchEnabled(enabled: Boolean) {
-            val svc = instance ?: return
-            svc.setOcrBoxTouchEnabledInternal(enabled)
+            instance?.setOcrBoxTouchEnabledInternal(enabled)
         }
 
         fun addLog(msg: String) {
             val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date())
-            logs.add("[$time] $msg")
-            if (logs.size > 250) logs.removeAt(0)
+            synchronized(logs) {
+                logs.add("[$time] $msg")
+                if (logs.size > 250) logs.removeAt(0)
+            }
+        }
+
+        fun clearLogs() {
+            synchronized(logs) {
+                logs.clear()
+            }
+            instance?.refreshLogs()
+        }
+
+        fun logText(): String {
+            return synchronized(logs) {
+                logs.joinToString("\n")
+            }
         }
     }
 
@@ -64,11 +77,11 @@ class OverlayService : Service() {
         instance = this
         wm = getSystemService(WINDOW_SERVICE) as WindowManager
 
-        createOcrBox()
+        createCropBox()
         createControlPanel()
     }
 
-    private fun createOcrBox() {
+    private fun createCropBox() {
         val prefs = getSharedPreferences("ocr_box", MODE_PRIVATE)
 
         box = FrameLayout(this)
@@ -76,14 +89,15 @@ class OverlayService : Service() {
         val border = GradientDrawable()
         border.setColor(Color.TRANSPARENT)
         border.setStroke(6, Color.WHITE)
-        border.cornerRadius = 35f
+        border.cornerRadius = 24f
         box.background = border
 
         val handle = TextView(this)
-        handle.text = "↘"
+        handle.text = "+"
         handle.textSize = 26f
+        handle.gravity = Gravity.CENTER
         handle.setTextColor(Color.WHITE)
-        handle.setBackgroundColor(Color.argb(80, 255, 255, 255))
+        handle.setBackgroundColor(Color.argb(90, 255, 255, 255))
 
         val handleParams = FrameLayout.LayoutParams(85, 85)
         handleParams.gravity = Gravity.BOTTOM or Gravity.RIGHT
@@ -96,7 +110,6 @@ class OverlayService : Service() {
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
         )
-
         boxParams.gravity = Gravity.TOP or Gravity.START
         boxParams.x = prefs.getInt("x", 120)
         boxParams.y = prefs.getInt("y", 220)
@@ -149,8 +162,9 @@ class OverlayService : Service() {
                     MotionEvent.ACTION_MOVE -> {
                         val newW = startW + (e.rawX - touchX).toInt()
                         val newH = startH + (e.rawY - touchY).toInt()
-                        boxParams.width = if (newW < minSize) minSize else newW
-                        boxParams.height = if (newH < minSize) minSize else newH
+                        val size = maxOf(minSize, minOf(newW, newH))
+                        boxParams.width = size
+                        boxParams.height = size
                         wm.updateViewLayout(box, boxParams)
                         return true
                     }
@@ -170,31 +184,20 @@ class OverlayService : Service() {
         panel = LinearLayout(this)
         panel.orientation = LinearLayout.VERTICAL
         panel.setPadding(12, 12, 12, 12)
-        panel.setBackgroundColor(Color.argb(180, 0, 0, 0))
+        panel.setBackgroundColor(Color.argb(185, 0, 0, 0))
 
         val row = LinearLayout(this)
         row.orientation = LinearLayout.HORIZONTAL
 
-        val ocrCheck = CheckBox(this)
-        ocrCheck.text = "OCR"
-        ocrCheck.setTextColor(Color.WHITE)
-        ocrCheck.isChecked = true
-
-        val autoScrollCheck = CheckBox(this)
-        autoScrollCheck.text = "AUTO SCROLL"
-        autoScrollCheck.setTextColor(Color.WHITE)
-
         val startBtn = Button(this)
-        startBtn.text = "START"
+        startBtn.text = "START LIVE"
 
         val stopBtn = Button(this)
         stopBtn.text = "STOP"
 
         val clearBtn = Button(this)
-        clearBtn.text = "CLEAR"
+        clearBtn.text = "CLEAR LOGS"
 
-        row.addView(ocrCheck)
-        row.addView(autoScrollCheck)
         row.addView(startBtn)
         row.addView(stopBtn)
         row.addView(clearBtn)
@@ -202,12 +205,12 @@ class OverlayService : Service() {
         logView = TextView(this)
         logView.textSize = 13f
         logView.setTextColor(Color.WHITE)
-        logView.text = "Logs..."
+        logView.text = logText()
         logView.setPadding(8, 8, 8, 8)
 
         panel.addView(row)
 
-        val logScroll = android.widget.ScrollView(this)
+        val logScroll = ScrollView(this)
         logScroll.addView(logView)
         panel.addView(
             logScroll,
@@ -218,13 +221,12 @@ class OverlayService : Service() {
         )
 
         panelParams = WindowManager.LayoutParams(
-            680,
             760,
+            700,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
             WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
             PixelFormat.TRANSLUCENT
         )
-
         panelParams.gravity = Gravity.TOP or Gravity.START
         panelParams.x = 40
         panelParams.y = 40
@@ -256,53 +258,37 @@ class OverlayService : Service() {
         })
 
         startBtn.setOnClickListener {
-            val ocr = ocrCheck.isChecked
-            val autoScroll = autoScrollCheck.isChecked
-            addLog("START_CLICK OCR=$ocr AUTO_SCROLL=$autoScroll")
-            addLog("AUTO_SCROLL_SERVICE_INSTANCE=${AutoScrollAccessibilityService.instance != null}")
-
-            if (!ocr) {
-                addLog("START_BLOCKED enable OCR first")
-                return@setOnClickListener
-            }
-
-            if (autoScroll && AutoScrollAccessibilityService.instance == null) {
-                addLog("AUTO_SCROLL_PERMISSION_REQUIRED")
-                val accIntent = Intent(android.provider.Settings.ACTION_ACCESSIBILITY_SETTINGS)
-                accIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                startActivity(accIntent)
-                return@setOnClickListener
-            }
-
+            addLog("LIVE_START_CLICK")
             val intent = Intent(this, MainActivity::class.java)
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            intent.putExtra("auto_start_ocr", true)
-            intent.putExtra("auto_start_scroll", autoScroll)
+            intent.putExtra("auto_start_live", true)
             startActivity(intent)
-
-            if (autoScroll) addLog("START mode=OCR+AUTO_SCROLL")
-            else addLog("START mode=OCR_ONLY")
         }
 
         stopBtn.setOnClickListener {
             stopService(Intent(this, ScreenCaptureService::class.java))
-            AutoScrollAccessibilityService.instance?.stopAutoScroll()
-            addLog("STOP_CLICK")
+            AutoScrollAccessibilityService.instance?.stopCommandExecution()
+            addLog("LIVE_STOP_CLICK")
         }
 
         clearBtn.setOnClickListener {
-            logs.clear()
-            logView.text = ""
+            clearLogs()
         }
 
         wm.addView(panel, panelParams)
 
         handler.post(object : Runnable {
             override fun run() {
-                logView.text = logs.joinToString("\n")
+                refreshLogs()
                 handler.postDelayed(this, 500)
             }
         })
+    }
+
+    private fun refreshLogs() {
+        if (::logView.isInitialized) {
+            logView.text = logText()
+        }
     }
 
     private fun setOcrBoxTouchEnabledInternal(enabled: Boolean) {
@@ -334,18 +320,13 @@ class OverlayService : Service() {
         @Suppress("DEPRECATION")
         wm.defaultDisplay.getRealMetrics(metrics)
 
-        val realX = loc[0]
-        val realY = loc[1]
         val realW = box.width
         val realH = box.height
-
-        if (realW < 250 || realH < 250) {
-            return
-        }
+        if (realW < minSize || realH < minSize) return
 
         getSharedPreferences("ocr_box", MODE_PRIVATE).edit()
-            .putInt("x", realX)
-            .putInt("y", realY)
+            .putInt("x", loc[0])
+            .putInt("y", loc[1])
             .putInt("w", realW)
             .putInt("h", realH)
             .putInt("screen_w", metrics.widthPixels)

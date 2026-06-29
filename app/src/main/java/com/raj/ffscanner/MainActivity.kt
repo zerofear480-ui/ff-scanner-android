@@ -3,22 +3,20 @@ package com.raj.ffscanner
 import android.Manifest
 import android.app.Activity
 import android.content.Intent
-import android.content.ComponentName
 import android.graphics.Color
+import android.media.projection.MediaProjectionManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
-import android.media.projection.MediaProjectionManager
-import android.widget.*
+import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.Space
+import android.widget.TextView
 
 class MainActivity : Activity() {
-    private var pendingAutoScrollFromOverlay = false
-
-
     private val requestCode = 1001
     private lateinit var status: TextView
-    private lateinit var apiInput: EditText
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -39,101 +37,41 @@ class MainActivity : Activity() {
         status.text = "Status: Ready"
         status.textSize = 17f
 
-        apiInput = EditText(this)
-        apiInput.setText("http://13.203.102.124:8000/api/ocr-scan")
-
-        val overlayPermissionBtn = Button(this)
-        overlayPermissionBtn.text = "ALLOW FLOATING BOX PERMISSION"
-
-        val showBoxBtn = Button(this)
-        showBoxBtn.text = "SHOW OCR BOX"
-
-        val hideBoxBtn = Button(this)
-        hideBoxBtn.text = "HIDE OCR BOX"
-
         val startBtn = Button(this)
-        startBtn.text = "START OCR SCANNER"
+        startBtn.text = "START LIVE"
 
         val stopBtn = Button(this)
-        stopBtn.text = "STOP SCANNER"
+        stopBtn.text = "STOP"
+
+        val clearBtn = Button(this)
+        clearBtn.text = "CLEAR LOGS"
 
         val accessibilityBtn = Button(this)
-        accessibilityBtn.text = "ALLOW AUTO SCROLL PERMISSION"
-
-        val startScrollBtn = Button(this)
-        startScrollBtn.text = "START AUTO SCROLL"
-
-        val stopScrollBtn = Button(this)
-        stopScrollBtn.text = "STOP AUTO SCROLL"
-
-        overlayPermissionBtn.setOnClickListener {
-            if (!Settings.canDrawOverlays(this)) {
-                val intent = Intent(
-                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:$packageName")
-                )
-                startActivity(intent)
-            } else {
-                status.text = "Status: Floating box permission already allowed"
-            }
-        }
-
-        showBoxBtn.setOnClickListener {
-            if (Settings.canDrawOverlays(this)) {
-                startService(Intent(this, OverlayService::class.java))
-                status.text = "Status: OCR box shown"
-            } else {
-                status.text = "Status: Allow floating box permission first"
-            }
-        }
-
-        hideBoxBtn.setOnClickListener {
-            stopService(Intent(this, OverlayService::class.java))
-            status.text = "Status: OCR box hidden"
-        }
+        accessibilityBtn.text = "ACCESSIBILITY PERMISSION"
 
         startBtn.setOnClickListener {
-            val manager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-            startActivityForResult(manager.createScreenCaptureIntent(), requestCode)
+            startLive()
         }
 
         stopBtn.setOnClickListener {
-            stopService(Intent(this, ScreenCaptureService::class.java))
-            AutoScrollAccessibilityService.instance?.stopAutoScroll()
-            stopService(Intent(this, OverlayService::class.java))
-            status.text = "Status: Scanner stopped"
+            stopLive()
+        }
+
+        clearBtn.setOnClickListener {
+            OverlayService.clearLogs()
+            status.text = "Status: Logs cleared"
         }
 
         accessibilityBtn.setOnClickListener {
-            val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-            startActivity(intent)
-            status.text = "Status: Enable FF Scanner auto scroll service"
-        }
-
-        startScrollBtn.setOnClickListener {
-            val service = AutoScrollAccessibilityService.instance
-            if (service == null) {
-                status.text = "Status: Enable auto scroll permission first"
-                startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-            } else {
-                service.startAutoScroll()
-                status.text = "Status: Auto scroll started"
-            }
-        }
-
-        stopScrollBtn.setOnClickListener {
-            AutoScrollAccessibilityService.instance?.stopAutoScroll()
-            status.text = "Status: Auto scroll stopped"
+            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
+            status.text = "Status: Enable FF Scanner accessibility service"
         }
 
         layout.addView(title)
         layout.addView(status)
-        layout.addView(apiInput)
-        layout.addView(overlayPermissionBtn)
-        layout.addView(showBoxBtn)
-        layout.addView(hideBoxBtn)
         layout.addView(startBtn)
         layout.addView(stopBtn)
+        layout.addView(clearBtn)
         layout.addView(accessibilityBtn)
 
         val spacer = Space(this)
@@ -147,21 +85,41 @@ class MainActivity : Activity() {
         )
 
         val version = TextView(this)
-        version.text = "Version: v${BuildConfig.VERSION_NAME}"
+        version.text = "Version: v0.8.7 Live Crop Stream"
         version.textSize = 12f
         version.setTextColor(Color.GRAY)
-        version.setPadding(0,24,0,0)
+        version.setPadding(0, 24, 0, 0)
         layout.addView(version)
 
         setContentView(layout)
 
-        pendingAutoScrollFromOverlay = intent?.getBooleanExtra("auto_start_scroll", false) == true
-
-        if (intent?.getBooleanExtra("auto_start_ocr", false) == true) {
-            status.text = "Status: Auto starting OCR..."
-            val manager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-            startActivityForResult(manager.createScreenCaptureIntent(), requestCode)
+        if (intent?.getBooleanExtra("auto_start_live", false) == true) {
+            startLive()
+        } else if (Settings.canDrawOverlays(this)) {
+            startService(Intent(this, OverlayService::class.java))
         }
+    }
+
+    private fun startLive() {
+        if (!Settings.canDrawOverlays(this)) {
+            status.text = "Status: Allow overlay permission for crop square"
+            val intent = Intent(
+                Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                Uri.parse("package:$packageName")
+            )
+            startActivity(intent)
+            return
+        }
+
+        startService(Intent(this, OverlayService::class.java))
+        val manager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+        startActivityForResult(manager.createScreenCaptureIntent(), requestCode)
+    }
+
+    private fun stopLive() {
+        stopService(Intent(this, ScreenCaptureService::class.java))
+        AutoScrollAccessibilityService.instance?.stopCommandExecution()
+        status.text = "Status: Live stopped"
     }
 
     override fun onActivityResult(req: Int, res: Int, data: Intent?) {
@@ -169,11 +127,9 @@ class MainActivity : Activity() {
 
         if (req == requestCode && res == RESULT_OK && data != null) {
             val serviceIntent = Intent(this, ScreenCaptureService::class.java)
-            serviceIntent.action = ScreenCaptureService.ACTION_START_OCR
+            serviceIntent.action = ScreenCaptureService.ACTION_START_LIVE
             serviceIntent.putExtra("resultCode", res)
             serviceIntent.putExtra("data", data)
-            serviceIntent.putExtra("apiUrl", apiInput.text.toString())
-            serviceIntent.putExtra(ScreenCaptureService.EXTRA_AUTO_SCROLL_ENABLED, pendingAutoScrollFromOverlay)
 
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(serviceIntent)
@@ -181,29 +137,9 @@ class MainActivity : Activity() {
                 startService(serviceIntent)
             }
 
-            if (Settings.canDrawOverlays(this)) {
-                startService(Intent(this, OverlayService::class.java))
-            }
-
-            status.text = "Status: Scanner running"
-            pendingAutoScrollFromOverlay = false
+            status.text = "Status: Live crop stream running"
         } else {
-            status.text = "Status: Permission denied"
+            status.text = "Status: Screen capture permission denied"
         }
     }
-
-    private fun startPendingAutoScrollIfNeeded() {
-        if (!pendingAutoScrollFromOverlay) return
-        OverlayService.addLog("AUTO_SCROLL_SERVICE_INSTANCE=${AutoScrollAccessibilityService.instance != null}")
-        val svc = AutoScrollAccessibilityService.instance
-        if (svc != null) {
-            svc.startAutoScroll()
-            pendingAutoScrollFromOverlay = false
-        } else {
-            OverlayService.addLog("AUTO_SCROLL_PERMISSION_REQUIRED")
-            status.text = "Status: Enable auto scroll permission first"
-            startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS))
-        }
-    }
-
 }

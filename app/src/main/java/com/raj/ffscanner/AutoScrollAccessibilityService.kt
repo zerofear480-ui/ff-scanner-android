@@ -8,216 +8,124 @@ import android.os.Looper
 import android.view.accessibility.AccessibilityEvent
 
 class AutoScrollAccessibilityService : AccessibilityService() {
-
     companion object {
         var instance: AutoScrollAccessibilityService? = null
-        var isRunning = false
     }
 
     private val handler = Handler(Looper.getMainLooper())
-    private var directionDown = false
-    private var swipeCount = 0
-    private var backendSwipeRunning = false
-
-    private val scrollTask = object : Runnable {
-        override fun run() {
-            if (!isRunning) return
-
-            performScoreboardSwipe()
-        }
-    }
+    private var commandRunning = false
 
     override fun onServiceConnected() {
         super.onServiceConnected()
         instance = this
+        OverlayService.addLog("ACCESSIBILITY_CONNECTED")
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
 
-    override fun onInterrupt() {}
+    override fun onInterrupt() {
+        stopCommandExecution()
+    }
 
     override fun onDestroy() {
         super.onDestroy()
-        stopAutoScroll()
+        stopCommandExecution()
         instance = null
     }
 
-    fun startAutoScroll() {
-        OverlayService.addLog("AUTO_SCROLL_START_CALLED")
-        if (isRunning) {
-            OverlayService.addLog("AUTO_SCROLL_ALREADY_RUNNING")
-            return
-        }
-        isRunning = true
-        directionDown = false
-        swipeCount = 0
-        OverlayService.addLog("AUTO_SCROLL_RUNNING=true")
-        handler.post(scrollTask)
-    }
-
-    fun stopAutoScroll() {
-        isRunning = false
-        handler.removeCallbacks(scrollTask)
+    fun stopCommandExecution() {
+        commandRunning = false
         OverlayService.setOcrBoxTouchEnabled(true)
     }
 
-    fun stopBackendAutoScroll() {
-        backendSwipeRunning = false
-        OverlayService.setOcrBoxTouchEnabled(true)
-    }
-
-    fun performBackendSwipeUp(onComplete: () -> Unit) {
-        performBackendSwipe("BOTTOM_TO_TOP", onComplete)
-    }
-
-    fun performBackendSwipe(direction: String, onComplete: () -> Unit) {
+    fun executeSwipe(
+        x: Int,
+        startY: Int,
+        endY: Int,
+        durationMs: Long,
+        onComplete: () -> Unit
+    ) {
         if (Looper.myLooper() != Looper.getMainLooper()) {
-            handler.post { performBackendSwipe(direction, onComplete) }
+            handler.post { executeSwipe(x, startY, endY, durationMs, onComplete) }
             return
         }
 
-        if (backendSwipeRunning) {
-            OverlayService.addLog("AUTO_SCROLL_SKIP reason=swipe_in_progress")
+        if (commandRunning) {
+            OverlayService.addLog("COMMAND_WAIT reason=gesture_in_progress")
             onComplete()
             return
         }
 
-        backendSwipeRunning = true
-        performScoreboardSwipe(
-            direction = normalizeDirection(direction),
-            completeOnGesture = true,
-            onComplete = {
-                backendSwipeRunning = false
-                onComplete()
-            }
-        )
+        commandRunning = true
+        OverlayService.addLog("COMMAND_EXECUTE SWIPE x=$x y1=$startY y2=$endY")
+
+        val path = Path().apply {
+            moveTo(x.toFloat(), startY.toFloat())
+            lineTo(x.toFloat(), endY.toFloat())
+        }
+        dispatch(path, durationMs.coerceAtLeast(1L), onComplete)
     }
 
-    private fun performScoreboardSwipe() {
-        val direction = if (!directionDown) "BOTTOM_TO_TOP" else "TOP_TO_BOTTOM"
-        performScoreboardSwipe(
-            direction = direction,
-            completeOnGesture = false,
-            onComplete = {}
-        )
-    }
-
-    private fun performScoreboardSwipe(
-        direction: String,
-        completeOnGesture: Boolean,
+    fun executeTap(
+        x: Int,
+        y: Int,
+        durationMs: Long,
         onComplete: () -> Unit
     ) {
-        val rect = OverlayService.getBoxRect()
-        val step = swipeCount + 1
-
-        if (rect == null || rect.width() <= 30 || rect.height() <= 30) {
-            OverlayService.addLog("AUTO_SCROLL_RECT x=0 y=0 w=0 h=0")
-            OverlayService.addLog("AUTO_SCROLL_SKIP reason=invalid_swipe_rect")
-            OverlayService.addLog("AUTO_SCROLL_DISPATCH ok=false direction=$direction step=$step/3")
-            if (completeOnGesture) {
-                onComplete()
-            } else {
-                scheduleNextSwipe()
-            }
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            handler.post { executeTap(x, y, durationMs, onComplete) }
             return
         }
 
-        OverlayService.addLog("AUTO_SCROLL_RECT x=${rect.left} y=${rect.top} w=${rect.width()} h=${rect.height()}")
+        if (commandRunning) {
+            OverlayService.addLog("COMMAND_WAIT reason=gesture_in_progress")
+            onComplete()
+            return
+        }
 
-        val x = rect.centerX().toFloat()
-        val topY = rect.top + rect.height() * 0.10f
-        val bottomY = rect.bottom - rect.height() * 0.10f
-        val startY = if (direction == "BOTTOM_TO_TOP") bottomY else topY
-        val endY = if (direction == "BOTTOM_TO_TOP") topY else bottomY
-        OverlayService.addLog(
-            "AUTO_SCROLL_EXECUTE start direction=$direction " +
-                "startX=${x.toInt()} startY=${startY.toInt()} endX=${x.toInt()} endY=${endY.toInt()}"
-        )
+        commandRunning = true
+        OverlayService.addLog("COMMAND_EXECUTE TAP x=$x y=$y")
 
         val path = Path().apply {
-            moveTo(x, startY)
-            lineTo(x, endY)
+            moveTo(x.toFloat(), y.toFloat())
         }
+        dispatch(path, durationMs.coerceAtLeast(1L), onComplete)
+    }
 
+    private fun dispatch(path: Path, durationMs: Long, onComplete: () -> Unit) {
         val gesture = GestureDescription.Builder()
-            .addStroke(GestureDescription.StrokeDescription(path, 0, 350))
+            .addStroke(GestureDescription.StrokeDescription(path, 0, durationMs))
             .build()
 
-        OverlayService.addLog("AUTO_SCROLL_TOUCH_MODE=UNDERLAY")
         OverlayService.setOcrBoxTouchEnabled(false)
-
-        handler.postDelayed({
-            if (!isRunning && !completeOnGesture) {
-                OverlayService.setOcrBoxTouchEnabled(true)
-                return@postDelayed
-            }
-
-            val ok = try {
-                dispatchGesture(gesture, object : GestureResultCallback() {
-                    override fun onCompleted(gestureDescription: GestureDescription?) {
-                        super.onCompleted(gestureDescription)
-                        OverlayService.addLog("AUTO_SCROLL_EXECUTE result=completed direction=$direction")
-                        OverlayService.addLog("AUTO_SCROLL_GESTURE_DONE")
-                        OverlayService.setOcrBoxTouchEnabled(true)
-                        if (completeOnGesture) {
-                            onComplete()
-                        } else {
-                            advanceDirection()
-                            scheduleNextSwipe()
-                        }
-                    }
-
-                    override fun onCancelled(gestureDescription: GestureDescription?) {
-                        super.onCancelled(gestureDescription)
-                        OverlayService.addLog("AUTO_SCROLL_EXECUTE result=cancelled direction=$direction")
-                        OverlayService.addLog("AUTO_SCROLL_GESTURE_CANCELLED")
-                        OverlayService.setOcrBoxTouchEnabled(true)
-                        if (completeOnGesture) {
-                            onComplete()
-                        } else {
-                            advanceDirection()
-                            scheduleNextSwipe()
-                        }
-                    }
-                }, null)
-            } catch (e: Exception) {
-                OverlayService.addLog("AUTO_SCROLL_DISPATCH_ERROR error=${e.message ?: "unknown"}")
-                false
-            }
-            OverlayService.addLog("AUTO_SCROLL_EXECUTE result=dispatch_ok_$ok direction=$direction")
-            OverlayService.addLog("AUTO_SCROLL_DISPATCH ok=$ok direction=$direction step=$step/3")
-
-            if (!ok) {
-                OverlayService.setOcrBoxTouchEnabled(true)
-                if (completeOnGesture) {
+        val ok = try {
+            dispatchGesture(gesture, object : GestureResultCallback() {
+                override fun onCompleted(gestureDescription: GestureDescription?) {
+                    super.onCompleted(gestureDescription)
+                    commandRunning = false
+                    OverlayService.setOcrBoxTouchEnabled(true)
+                    OverlayService.addLog("COMMAND_DONE")
                     onComplete()
-                } else {
-                    advanceDirection()
-                    scheduleNextSwipe()
                 }
-            }
-        }, 50)
-    }
 
-    private fun advanceDirection() {
-        swipeCount++
-        if (swipeCount >= 3) {
-            swipeCount = 0
-            directionDown = !directionDown
+                override fun onCancelled(gestureDescription: GestureDescription?) {
+                    super.onCancelled(gestureDescription)
+                    commandRunning = false
+                    OverlayService.setOcrBoxTouchEnabled(true)
+                    OverlayService.addLog("COMMAND_DONE result=cancelled")
+                    onComplete()
+                }
+            }, null)
+        } catch (e: Exception) {
+            OverlayService.addLog("WS_ERROR command_dispatch=${e.message ?: "unknown"}")
+            false
         }
-    }
 
-    private fun scheduleNextSwipe() {
-        if (!isRunning) return
-        handler.removeCallbacks(scrollTask)
-        handler.postDelayed(scrollTask, 1000)
-    }
-
-    private fun normalizeDirection(direction: String): String {
-        val normalized = direction.trim().uppercase(java.util.Locale.US).replace("-", "_")
-        return when (normalized) {
-            "TOP_TO_BOTTOM", "DOWN", "SCROLL_DOWN" -> "TOP_TO_BOTTOM"
-            else -> "BOTTOM_TO_TOP"
+        if (!ok) {
+            commandRunning = false
+            OverlayService.setOcrBoxTouchEnabled(true)
+            OverlayService.addLog("COMMAND_DONE result=dispatch_failed")
+            onComplete()
         }
     }
 }
