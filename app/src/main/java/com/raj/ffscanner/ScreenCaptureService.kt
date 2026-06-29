@@ -32,6 +32,7 @@ import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.nio.ByteBuffer
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 class ScreenCaptureService : Service() {
     companion object {
@@ -39,8 +40,8 @@ class ScreenCaptureService : Service() {
         const val ACTION_STOP_LIVE = "com.raj.ffscanner.STOP_LIVE"
         private const val BACKEND_URL = "http://13.203.102.124:8000"
         private const val WS_URL = "ws://13.203.102.124:8000/ws/live-crop"
-        private const val FRAME_INTERVAL_MS = 200L
-        private const val JPEG_QUALITY = 55
+        private const val FRAME_INTERVAL_MS = 33L
+        private const val JPEG_QUALITY = 65
         private const val MAX_FRAME_WIDTH = 480
         private var instance: ScreenCaptureService? = null
     }
@@ -50,6 +51,8 @@ class ScreenCaptureService : Service() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private lateinit var captureThread: HandlerThread
     private lateinit var captureHandler: Handler
+    private lateinit var encoderThread: HandlerThread
+    private lateinit var encoderHandler: Handler
     private val client = OkHttpClient.Builder()
         .retryOnConnectionFailure(true)
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -68,8 +71,8 @@ class ScreenCaptureService : Service() {
     private var virtualDisplay: VirtualDisplay? = null
     private var webSocket: WebSocket? = null
     @Volatile private var liveRunning = false
-    @Volatile private var frameBusy = false
     @Volatile private var wsConnected = false
+    private val encoderBusy = AtomicBoolean(false)
     private var displayWidth = 0
     private var displayHeight = 0
     private var sentSinceSummary = 0
@@ -93,6 +96,9 @@ class ScreenCaptureService : Service() {
         captureThread = HandlerThread("LiveCropStream")
         captureThread.start()
         captureHandler = Handler(captureThread.looper)
+        encoderThread = HandlerThread("LiveCropEncoder")
+        encoderThread.start()
+        encoderHandler = Handler(encoderThread.looper)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -167,16 +173,15 @@ class ScreenCaptureService : Service() {
     private fun startLive() {
         if (liveRunning) return
         liveRunning = true
-        frameBusy = false
         wsConnected = false
         sentSinceSummary = 0
         droppedSinceSummary = 0
         lastFrameBytes = 0
         lastCrop = null
         summaryWindowStartMs = System.currentTimeMillis()
-        OverlayService.addLog("LIVE_START")
+        OverlayService.addLog("LIVE_STREAM_STARTED")
         openWebSocket()
-        scheduleNextFrame(200L)
+        scheduleNextFrame(0L)
     }
 
     private fun openWebSocket() {
@@ -187,7 +192,7 @@ class ScreenCaptureService : Service() {
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
                 wsConnected = true
-                OverlayService.addLog("WS_OPEN")
+                OverlayService.addLog("WS_CONNECTED")
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
@@ -203,13 +208,22 @@ class ScreenCaptureService : Service() {
                 if (response?.code == 404) {
                     OverlayService.addLog("WS_404_URL=$WS_URL")
                 }
+                scheduleReconnect()
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
                 wsConnected = false
                 OverlayService.addLog("WS_CLOSED code=$code reason=$reason")
+                scheduleReconnect()
             }
         })
+    }
+
+    private fun scheduleReconnect() {
+        if (!liveRunning) return
+        captureHandler.postDelayed({
+            if (liveRunning && !wsConnected) openWebSocket()
+        }, 1000L)
     }
 
     private fun scheduleNextFrame(delayMs: Long = FRAME_INTERVAL_MS) {
@@ -219,14 +233,12 @@ class ScreenCaptureService : Service() {
 
     private fun captureTick() {
         if (!liveRunning) return
-        if (frameBusy) {
+        if (encoderBusy.get()) {
             droppedSinceSummary++
             logSummaryIfDue()
             scheduleNextFrame()
             return
         }
-
-        frameBusy = true
         try {
             if (!wsConnected || webSocket == null) {
                 droppedSinceSummary++
@@ -270,30 +282,55 @@ class ScreenCaptureService : Service() {
 
             val cropped = Bitmap.createBitmap(bitmap, crop.x, crop.y, crop.width, crop.height)
             bitmap.recycle()
-            val frameBitmap = downscaleIfNeeded(cropped)
-            if (frameBitmap !== cropped) {
-                cropped.recycle()
-            }
-
-            val bos = ByteArrayOutputStream()
-            frameBitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, bos)
-            val bytes = bos.toByteArray()
-            frameBitmap.recycle()
-
-            if (sendFrame(bytes, crop)) {
-                sentSinceSummary++
-                lastFrameBytes = bytes.size
-                lastCrop = crop
-            } else {
-                droppedSinceSummary++
-            }
+            encodeAndSendLatest(cropped, crop)
         } catch (e: Exception) {
             droppedSinceSummary++
             OverlayService.addLog("WS_FAILURE frame=${e.message ?: "unknown"}")
         } finally {
-            frameBusy = false
             logSummaryIfDue()
             scheduleNextFrame()
+        }
+    }
+
+    private fun encodeAndSendLatest(cropped: Bitmap, crop: CropRect) {
+        if (!encoderBusy.compareAndSet(false, true)) {
+            droppedSinceSummary++
+            cropped.recycle()
+            return
+        }
+
+        encoderHandler.post {
+            try {
+                if (!liveRunning || !wsConnected || webSocket == null) {
+                    droppedSinceSummary++
+                    cropped.recycle()
+                    return@post
+                }
+
+                val frameBitmap = downscaleIfNeeded(cropped)
+                if (frameBitmap !== cropped) {
+                    cropped.recycle()
+                }
+
+                val bos = ByteArrayOutputStream()
+                frameBitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, bos)
+                val bytes = bos.toByteArray()
+                frameBitmap.recycle()
+
+                if (sendFrame(bytes, crop)) {
+                    sentSinceSummary++
+                    lastFrameBytes = bytes.size
+                    lastCrop = crop
+                    OverlayService.addLog("FRAME_SENT")
+                } else {
+                    droppedSinceSummary++
+                }
+            } catch (e: Exception) {
+                droppedSinceSummary++
+                OverlayService.addLog("WS_FAILURE encode=${e.message ?: "unknown"}")
+            } finally {
+                encoderBusy.set(false)
+            }
         }
     }
 
@@ -357,18 +394,16 @@ class ScreenCaptureService : Service() {
 
             val command = root.optString("command", "").uppercase(java.util.Locale.US)
             val reason = root.optString("reason", "none")
-            OverlayService.addLog("COMMAND_RECEIVED $command reason=$reason")
+            OverlayService.addLog("COMMAND_RECEIVED command=$command reason=$reason")
 
             when (command) {
                 "SWIPE" -> executeSwipe(root)
-                "TAP" -> executeTap(root)
-                "WAIT" -> OverlayService.addLog("COMMAND_WAIT reason=$reason")
                 "STOP" -> {
                     OverlayService.addLog("COMMAND_STOP reason=$reason")
                     stopLive(logStop = true)
                     stopSelf()
                 }
-                else -> OverlayService.addLog("COMMAND_WAIT reason=unknown_command_$command")
+                else -> OverlayService.addLog("COMMAND_IGNORED reason=unknown_command_$command")
             }
         } catch (e: Exception) {
             OverlayService.addLog("WS_FAILURE command_parse=${e.message ?: "unknown"}")
@@ -391,31 +426,13 @@ class ScreenCaptureService : Service() {
             startY = root.optInt("startY", (displayHeight * 0.70f).toInt()),
             endY = root.optInt("endY", (displayHeight * 0.30f).toInt()),
             durationMs = root.optLong("durationMs", 350L)
-        ) {}
-    }
-
-    private fun executeTap(root: JSONObject) {
-        val service = AutoScrollAccessibilityService.instance
-        if (service == null) {
-            OverlayService.addLog("ACCESSIBILITY_PERMISSION_MISSING")
-            OverlayService.addLog("COMMAND_WAIT reason=accessibility_permission_missing")
-            val intent = Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
-            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-            startActivity(intent)
-            return
-        }
-
-        service.executeTap(
-            x = root.optInt("x", displayWidth / 2),
-            y = root.optInt("y", displayHeight / 2),
-            durationMs = root.optLong("durationMs", 80L)
-        ) {}
+        )
+        OverlayService.addLog("STREAM_CONTINUING")
     }
 
     private fun stopLive(logStop: Boolean) {
         val wasRunning = liveRunning
         liveRunning = false
-        frameBusy = false
         wsConnected = false
         if (::captureHandler.isInitialized) {
             captureHandler.removeCallbacks(frameRunnable)
@@ -424,7 +441,7 @@ class ScreenCaptureService : Service() {
         webSocket = null
         AutoScrollAccessibilityService.instance?.stopCommandExecution()
         if (logStop && wasRunning) {
-            OverlayService.addLog("LIVE_STOP")
+            OverlayService.addLog("STOP_STREAM")
         }
     }
 
@@ -465,6 +482,9 @@ class ScreenCaptureService : Service() {
         try { projection?.stop() } catch (_: Exception) {}
         if (::captureThread.isInitialized) {
             captureThread.quitSafely()
+        }
+        if (::encoderThread.isInitialized) {
+            encoderThread.quitSafely()
         }
         if (instance === this) instance = null
         super.onDestroy()

@@ -42,57 +42,29 @@ class AutoScrollAccessibilityService : AccessibilityService() {
         x: Int,
         startY: Int,
         endY: Int,
-        durationMs: Long,
-        onComplete: () -> Unit
+        durationMs: Long
     ) {
         if (Looper.myLooper() != Looper.getMainLooper()) {
-            handler.post { executeSwipe(x, startY, endY, durationMs, onComplete) }
+            handler.post { executeSwipe(x, startY, endY, durationMs) }
             return
         }
 
         if (commandRunning) {
-            OverlayService.addLog("COMMAND_WAIT reason=gesture_in_progress")
-            onComplete()
+            OverlayService.addLog("COMMAND_IGNORED reason=gesture_in_progress")
             return
         }
 
         commandRunning = true
-        OverlayService.addLog("COMMAND_EXECUTE SWIPE x=$x y1=$startY y2=$endY")
+        OverlayService.addLog("SWIPE_EXECUTED x=$x y1=$startY y2=$endY")
 
         val path = Path().apply {
             moveTo(x.toFloat(), startY.toFloat())
             lineTo(x.toFloat(), endY.toFloat())
         }
-        dispatch(path, durationMs.coerceAtLeast(1L), onComplete)
+        dispatch(path, durationMs.coerceAtLeast(1L))
     }
 
-    fun executeTap(
-        x: Int,
-        y: Int,
-        durationMs: Long,
-        onComplete: () -> Unit
-    ) {
-        if (Looper.myLooper() != Looper.getMainLooper()) {
-            handler.post { executeTap(x, y, durationMs, onComplete) }
-            return
-        }
-
-        if (commandRunning) {
-            OverlayService.addLog("COMMAND_WAIT reason=gesture_in_progress")
-            onComplete()
-            return
-        }
-
-        commandRunning = true
-        OverlayService.addLog("COMMAND_EXECUTE TAP x=$x y=$y")
-
-        val path = Path().apply {
-            moveTo(x.toFloat(), y.toFloat())
-        }
-        dispatch(path, durationMs.coerceAtLeast(1L), onComplete)
-    }
-
-    private fun dispatch(path: Path, durationMs: Long, onComplete: () -> Unit) {
+    private fun dispatch(path: Path, durationMs: Long) {
         val gesture = GestureDescription.Builder()
             .addStroke(GestureDescription.StrokeDescription(path, 0, durationMs))
             .build()
@@ -105,7 +77,6 @@ class AutoScrollAccessibilityService : AccessibilityService() {
                     commandRunning = false
                     OverlayService.setOcrBoxTouchEnabled(true)
                     OverlayService.addLog("COMMAND_DONE")
-                    onComplete()
                 }
 
                 override fun onCancelled(gestureDescription: GestureDescription?) {
@@ -113,7 +84,6 @@ class AutoScrollAccessibilityService : AccessibilityService() {
                     commandRunning = false
                     OverlayService.setOcrBoxTouchEnabled(true)
                     OverlayService.addLog("COMMAND_DONE result=cancelled")
-                    onComplete()
                 }
             }, null)
         } catch (e: Exception) {
@@ -125,7 +95,6 @@ class AutoScrollAccessibilityService : AccessibilityService() {
             commandRunning = false
             OverlayService.setOcrBoxTouchEnabled(true)
             OverlayService.addLog("COMMAND_DONE result=dispatch_failed")
-            onComplete()
         }
     }
 }
