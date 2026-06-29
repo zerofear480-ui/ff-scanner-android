@@ -147,7 +147,7 @@ class MainActivity : Activity() {
         )
 
         val version = TextView(this)
-        version.text = "Version: v0.8.5 - 2026-06-25 - Underlay AutoScroll Fix"
+        version.text = "Version: v${BuildConfig.VERSION_NAME}"
         version.textSize = 12f
         version.setTextColor(Color.GRAY)
         version.setPadding(0,24,0,0)
