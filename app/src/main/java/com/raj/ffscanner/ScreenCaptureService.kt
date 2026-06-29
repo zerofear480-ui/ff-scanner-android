@@ -16,6 +16,7 @@ import android.media.projection.MediaProjection
 import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.Handler
+import android.os.HandlerThread
 import android.os.IBinder
 import android.os.Looper
 import android.provider.Settings
@@ -37,13 +38,17 @@ class ScreenCaptureService : Service() {
         const val ACTION_START_LIVE = "com.raj.ffscanner.START_LIVE"
         const val ACTION_STOP_LIVE = "com.raj.ffscanner.STOP_LIVE"
         private const val WS_URL = "ws://13.203.102.124:8000/ws/live-crop"
-        private const val FRAME_INTERVAL_MS = 75L
+        private const val FRAME_INTERVAL_MS = 200L
+        private const val JPEG_QUALITY = 55
+        private const val MAX_FRAME_WIDTH = 480
         private var instance: ScreenCaptureService? = null
     }
 
     private val channelId = "ff_scanner_channel"
     private val notificationId = 101
-    private val handler = Handler(Looper.getMainLooper())
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private lateinit var captureThread: HandlerThread
+    private lateinit var captureHandler: Handler
     private val client = OkHttpClient.Builder()
         .retryOnConnectionFailure(true)
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -53,7 +58,7 @@ class ScreenCaptureService : Service() {
 
     private val frameRunnable = object : Runnable {
         override fun run() {
-            captureAndSendFrame()
+            captureTick()
         }
     }
 
@@ -61,14 +66,16 @@ class ScreenCaptureService : Service() {
     private var imageReader: ImageReader? = null
     private var virtualDisplay: VirtualDisplay? = null
     private var webSocket: WebSocket? = null
-    private var liveRunning = false
-    private var frameBusy = false
-    private var wsConnected = false
+    @Volatile private var liveRunning = false
+    @Volatile private var frameBusy = false
+    @Volatile private var wsConnected = false
     private var displayWidth = 0
     private var displayHeight = 0
-    private var frameCount = 0
-    private var fpsWindowStartMs = 0L
-    private var lastFps = 0
+    private var sentSinceSummary = 0
+    private var droppedSinceSummary = 0
+    private var lastFrameBytes = 0
+    private var lastCrop: CropRect? = null
+    private var summaryWindowStartMs = 0L
     private val deviceId by lazy {
         Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID) ?: "android"
     }
@@ -82,6 +89,9 @@ class ScreenCaptureService : Service() {
     override fun onCreate() {
         super.onCreate()
         instance = this
+        captureThread = HandlerThread("LiveCropStream")
+        captureThread.start()
+        captureHandler = Handler(captureThread.looper)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -128,7 +138,7 @@ class ScreenCaptureService : Service() {
     private fun startProjection(resultCode: Int, data: Intent) {
         val manager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         projection = manager.getMediaProjection(resultCode, data)
-        projection?.registerCallback(projectionCallback, handler)
+        projection?.registerCallback(projectionCallback, mainHandler)
         createCapturePipeline()
     }
 
@@ -149,7 +159,7 @@ class ScreenCaptureService : Service() {
             DisplayManager.VIRTUAL_DISPLAY_FLAG_AUTO_MIRROR,
             imageReader?.surface,
             null,
-            handler
+            captureHandler
         )
     }
 
@@ -158,11 +168,14 @@ class ScreenCaptureService : Service() {
         liveRunning = true
         frameBusy = false
         wsConnected = false
-        frameCount = 0
-        fpsWindowStartMs = System.currentTimeMillis()
+        sentSinceSummary = 0
+        droppedSinceSummary = 0
+        lastFrameBytes = 0
+        lastCrop = null
+        summaryWindowStartMs = System.currentTimeMillis()
         OverlayService.addLog("LIVE_START")
         openWebSocket()
-        scheduleNextFrame(150L)
+        scheduleNextFrame(200L)
     }
 
     private fun openWebSocket() {
@@ -170,63 +183,56 @@ class ScreenCaptureService : Service() {
         val request = Request.Builder().url(WS_URL).build()
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
-                handler.post {
-                    wsConnected = true
-                    OverlayService.addLog("WS_CONNECTED")
-                }
+                wsConnected = true
+                OverlayService.addLog("WS_OPEN")
             }
 
             override fun onMessage(webSocket: WebSocket, text: String) {
-                handler.post {
+                mainHandler.post {
                     handleCommandMessage(text)
                 }
             }
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-                handler.post {
-                    wsConnected = false
-                    OverlayService.addLog("WS_ERROR error=${t.message ?: "unknown"}")
-                }
+                wsConnected = false
+                OverlayService.addLog("WS_FAILURE error=${t.message ?: "unknown"}")
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-                handler.post {
-                    wsConnected = false
-                    OverlayService.addLog("WS_CLOSED code=$code reason=$reason")
-                }
+                wsConnected = false
+                OverlayService.addLog("WS_CLOSED code=$code reason=$reason")
             }
         })
     }
 
     private fun scheduleNextFrame(delayMs: Long = FRAME_INTERVAL_MS) {
         if (!liveRunning) return
-        handler.postDelayed(frameRunnable, delayMs)
+        captureHandler.postDelayed(frameRunnable, delayMs)
     }
 
-    private fun captureAndSendFrame() {
+    private fun captureTick() {
         if (!liveRunning) return
         if (frameBusy) {
+            droppedSinceSummary++
+            logSummaryIfDue()
             scheduleNextFrame()
             return
         }
-        frameBusy = true
 
+        frameBusy = true
         try {
             if (!wsConnected || webSocket == null) {
-                frameBusy = false
-                scheduleNextFrame()
+                droppedSinceSummary++
                 return
             }
 
             val reader = imageReader ?: run {
-                frameBusy = false
-                scheduleNextFrame()
+                droppedSinceSummary++
                 return
             }
 
             val image = reader.acquireLatestImage() ?: run {
-                frameBusy = false
-                scheduleNextFrame()
+                droppedSinceSummary++
                 return
             }
 
@@ -249,40 +255,58 @@ class ScreenCaptureService : Service() {
                 image.close()
             }
 
-            val crop = currentCrop(captureWidth, captureHeight)
-            val cropped = Bitmap.createBitmap(bitmap, crop.x, crop.y, crop.width, crop.height)
-            val bos = ByteArrayOutputStream()
-            cropped.compress(Bitmap.CompressFormat.JPEG, 65, bos)
-            val bytes = bos.toByteArray()
-            cropped.recycle()
-            bitmap.recycle()
+            val crop = currentCrop(captureWidth, captureHeight) ?: run {
+                droppedSinceSummary++
+                bitmap.recycle()
+                return
+            }
 
-            sendFrame(bytes, crop)
+            val cropped = Bitmap.createBitmap(bitmap, crop.x, crop.y, crop.width, crop.height)
+            bitmap.recycle()
+            val frameBitmap = downscaleIfNeeded(cropped)
+            if (frameBitmap !== cropped) {
+                cropped.recycle()
+            }
+
+            val bos = ByteArrayOutputStream()
+            frameBitmap.compress(Bitmap.CompressFormat.JPEG, JPEG_QUALITY, bos)
+            val bytes = bos.toByteArray()
+            frameBitmap.recycle()
+
+            if (sendFrame(bytes, crop)) {
+                sentSinceSummary++
+                lastFrameBytes = bytes.size
+                lastCrop = crop
+            } else {
+                droppedSinceSummary++
+            }
         } catch (e: Exception) {
-            OverlayService.addLog("WS_ERROR frame=${e.message ?: "unknown"}")
+            droppedSinceSummary++
+            OverlayService.addLog("WS_FAILURE frame=${e.message ?: "unknown"}")
         } finally {
             frameBusy = false
+            logSummaryIfDue()
             scheduleNextFrame()
         }
     }
 
-    private fun currentCrop(captureWidth: Int, captureHeight: Int): CropRect {
-        val rect = OverlayService.getBoxRect()
-        val prefs = getSharedPreferences("ocr_box", MODE_PRIVATE)
-        val savedX = rect?.left ?: prefs.getInt("x", 120)
-        val savedY = rect?.top ?: prefs.getInt("y", 220)
-        val savedW = rect?.width() ?: prefs.getInt("w", 600)
-        val savedH = rect?.height() ?: prefs.getInt("h", 600)
-        val size = minOf(savedW, savedH).coerceAtLeast(1)
-
-        val x = savedX.coerceAtLeast(0).coerceAtMost(captureWidth - 1)
-        val y = savedY.coerceAtLeast(0).coerceAtMost(captureHeight - 1)
-        val width = size.coerceAtMost(captureWidth - x)
-        val height = size.coerceAtMost(captureHeight - y)
+    private fun currentCrop(captureWidth: Int, captureHeight: Int): CropRect? {
+        val rect = OverlayService.getBoxRect() ?: return null
+        val x = rect.left.coerceAtLeast(0).coerceAtMost(captureWidth - 1)
+        val y = rect.top.coerceAtLeast(0).coerceAtMost(captureHeight - 1)
+        val width = rect.width().coerceAtLeast(1).coerceAtMost(captureWidth - x)
+        val height = rect.height().coerceAtLeast(1).coerceAtMost(captureHeight - y)
         return CropRect(x, y, width, height)
     }
 
-    private fun sendFrame(bytes: ByteArray, crop: CropRect) {
+    private fun downscaleIfNeeded(src: Bitmap): Bitmap {
+        if (src.width <= MAX_FRAME_WIDTH) return src
+        val targetHeight = maxOf(1, (src.height * (MAX_FRAME_WIDTH.toFloat() / src.width)).toInt())
+        return Bitmap.createScaledBitmap(src, MAX_FRAME_WIDTH, targetHeight, true)
+    }
+
+    private fun sendFrame(bytes: ByteArray, crop: CropRect): Boolean {
+        val socket = webSocket ?: return false
         val root = JSONObject()
         root.put("type", "FRAME")
         root.put("deviceId", deviceId)
@@ -295,28 +319,28 @@ class ScreenCaptureService : Service() {
             put("height", crop.height)
         })
         root.put("data", Base64.encodeToString(bytes, Base64.NO_WRAP))
-
-        val ok = webSocket?.send(root.toString()) == true
-        if (ok) {
-            val fps = updateFps()
-            OverlayService.addLog(
-                "FRAME_SENT fps=$fps bytes=${bytes.size} crop=${crop.x},${crop.y},${crop.width},${crop.height}"
-            )
-        } else {
-            OverlayService.addLog("WS_ERROR frame_send_failed")
-        }
+        return socket.send(root.toString())
     }
 
-    private fun updateFps(): Int {
-        frameCount++
+    private fun logSummaryIfDue() {
         val now = System.currentTimeMillis()
-        val elapsed = now - fpsWindowStartMs
-        if (elapsed >= 1000L) {
-            lastFps = ((frameCount * 1000L) / elapsed).toInt()
-            frameCount = 0
-            fpsWindowStartMs = now
+        val elapsed = now - summaryWindowStartMs
+        if (elapsed < 1000L) return
+
+        val fps = if (elapsed > 0) ((sentSinceSummary * 1000L) / elapsed).toInt() else 0
+        val crop = lastCrop
+        val cropText = if (crop != null) {
+            "${crop.x},${crop.y},${crop.width},${crop.height}"
+        } else {
+            "none"
         }
-        return lastFps
+        OverlayService.addLog(
+            "LIVE_SUMMARY fps=$fps sent=$sentSinceSummary dropped=$droppedSinceSummary " +
+                "ws=${if (wsConnected) "open" else "closed"} bytes=$lastFrameBytes crop=$cropText"
+        )
+        sentSinceSummary = 0
+        droppedSinceSummary = 0
+        summaryWindowStartMs = now
     }
 
     private fun handleCommandMessage(text: String) {
@@ -340,7 +364,7 @@ class ScreenCaptureService : Service() {
                 else -> OverlayService.addLog("COMMAND_WAIT reason=unknown_command_$command")
             }
         } catch (e: Exception) {
-            OverlayService.addLog("WS_ERROR command_parse=${e.message ?: "unknown"}")
+            OverlayService.addLog("WS_FAILURE command_parse=${e.message ?: "unknown"}")
         }
     }
 
@@ -386,7 +410,9 @@ class ScreenCaptureService : Service() {
         liveRunning = false
         frameBusy = false
         wsConnected = false
-        handler.removeCallbacks(frameRunnable)
+        if (::captureHandler.isInitialized) {
+            captureHandler.removeCallbacks(frameRunnable)
+        }
         try { webSocket?.close(1000, "client_stop") } catch (_: Exception) {}
         webSocket = null
         AutoScrollAccessibilityService.instance?.stopCommandExecution()
@@ -430,6 +456,9 @@ class ScreenCaptureService : Service() {
         try { imageReader?.close() } catch (_: Exception) {}
         try { projection?.unregisterCallback(projectionCallback) } catch (_: Exception) {}
         try { projection?.stop() } catch (_: Exception) {}
+        if (::captureThread.isInitialized) {
+            captureThread.quitSafely()
+        }
         if (instance === this) instance = null
         super.onDestroy()
     }

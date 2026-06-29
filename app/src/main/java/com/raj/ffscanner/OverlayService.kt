@@ -26,6 +26,7 @@ class OverlayService : Service() {
 
         fun getBoxRect(): Rect? {
             val svc = instance ?: return null
+            if (!svc.boxAdded) return null
             return try {
                 val loc = IntArray(2)
                 svc.box.getLocationOnScreen(loc)
@@ -39,6 +40,14 @@ class OverlayService : Service() {
 
         fun setOcrBoxTouchEnabled(enabled: Boolean) {
             instance?.setOcrBoxTouchEnabledInternal(enabled)
+        }
+
+        fun showBox() {
+            instance?.showBoxInternal()
+        }
+
+        fun hideBox() {
+            instance?.hideBoxInternal()
         }
 
         fun addLog(msg: String) {
@@ -71,6 +80,7 @@ class OverlayService : Service() {
     private lateinit var logView: TextView
     private val handler = Handler(Looper.getMainLooper())
     private val minSize = 250
+    private var boxAdded = false
 
     override fun onCreate() {
         super.onCreate()
@@ -162,9 +172,8 @@ class OverlayService : Service() {
                     MotionEvent.ACTION_MOVE -> {
                         val newW = startW + (e.rawX - touchX).toInt()
                         val newH = startH + (e.rawY - touchY).toInt()
-                        val size = maxOf(minSize, minOf(newW, newH))
-                        boxParams.width = size
-                        boxParams.height = size
+                        boxParams.width = maxOf(minSize, newW)
+                        boxParams.height = maxOf(minSize, newH)
                         wm.updateViewLayout(box, boxParams)
                         return true
                     }
@@ -178,6 +187,7 @@ class OverlayService : Service() {
         })
 
         wm.addView(box, boxParams)
+        boxAdded = true
     }
 
     private fun createControlPanel() {
@@ -189,6 +199,12 @@ class OverlayService : Service() {
         val row = LinearLayout(this)
         row.orientation = LinearLayout.HORIZONTAL
 
+        val showBtn = Button(this)
+        showBtn.text = "SHOW OCR BOX"
+
+        val hideBtn = Button(this)
+        hideBtn.text = "HIDE OCR BOX"
+
         val startBtn = Button(this)
         startBtn.text = "START LIVE"
 
@@ -198,9 +214,14 @@ class OverlayService : Service() {
         val clearBtn = Button(this)
         clearBtn.text = "CLEAR LOGS"
 
-        row.addView(startBtn)
-        row.addView(stopBtn)
-        row.addView(clearBtn)
+        row.addView(showBtn)
+        row.addView(hideBtn)
+
+        val row2 = LinearLayout(this)
+        row2.orientation = LinearLayout.HORIZONTAL
+        row2.addView(startBtn)
+        row2.addView(stopBtn)
+        row2.addView(clearBtn)
 
         logView = TextView(this)
         logView.textSize = 13f
@@ -209,6 +230,7 @@ class OverlayService : Service() {
         logView.setPadding(8, 8, 8, 8)
 
         panel.addView(row)
+        panel.addView(row2)
 
         val logScroll = ScrollView(this)
         logScroll.addView(logView)
@@ -257,8 +279,19 @@ class OverlayService : Service() {
             }
         })
 
+        showBtn.setOnClickListener {
+            showBoxInternal()
+            addLog("SHOW_OCR_BOX")
+        }
+
+        hideBtn.setOnClickListener {
+            hideBoxInternal()
+            addLog("HIDE_OCR_BOX")
+        }
+
         startBtn.setOnClickListener {
             addLog("LIVE_START_CLICK")
+            showBoxInternal()
             val intent = Intent(this, MainActivity::class.java)
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             intent.putExtra("auto_start_live", true)
@@ -292,6 +325,7 @@ class OverlayService : Service() {
     }
 
     private fun setOcrBoxTouchEnabledInternal(enabled: Boolean) {
+        if (!boxAdded) return
         val notTouchableFlag = WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
         val touchDisabled = (boxParams.flags and notTouchableFlag) != 0
 
@@ -309,6 +343,29 @@ class OverlayService : Service() {
             addLog(if (enabled) "OVERLAY_TOUCH_ENABLED" else "OVERLAY_TOUCH_DISABLED")
         } catch (e: Exception) {
             addLog("OVERLAY_TOUCH_UPDATE_FAILED error=${e.message ?: "unknown"}")
+        }
+    }
+
+    private fun showBoxInternal() {
+        if (!::box.isInitialized || boxAdded) return
+        try {
+            wm.addView(box, boxParams)
+            boxAdded = true
+            addLog("OCR_BOX_SHOWN")
+        } catch (e: Exception) {
+            addLog("OCR_BOX_SHOW_FAILED error=${e.message ?: "unknown"}")
+        }
+    }
+
+    private fun hideBoxInternal() {
+        if (!::box.isInitialized || !boxAdded) return
+        saveBox()
+        try {
+            wm.removeView(box)
+            boxAdded = false
+            addLog("OCR_BOX_HIDDEN")
+        } catch (e: Exception) {
+            addLog("OCR_BOX_HIDE_FAILED error=${e.message ?: "unknown"}")
         }
     }
 
@@ -335,8 +392,8 @@ class OverlayService : Service() {
     }
 
     override fun onDestroy() {
-        saveBox()
-        try { wm.removeView(box) } catch (_: Exception) {}
+        if (boxAdded) saveBox()
+        try { if (boxAdded) wm.removeView(box) } catch (_: Exception) {}
         try { wm.removeView(panel) } catch (_: Exception) {}
         super.onDestroy()
         instance = null

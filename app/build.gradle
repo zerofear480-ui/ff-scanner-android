@@ -11,8 +11,8 @@ android {
         applicationId "com.raj.ffscanner"
         minSdk 24
         targetSdk 34
-        versionCode 4
-        versionName "0.8.7"
+        versionCode 5
+        versionName "0.8.8"
     }
 
     buildFeatures {

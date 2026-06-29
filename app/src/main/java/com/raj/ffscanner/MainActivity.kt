@@ -37,6 +37,15 @@ class MainActivity : Activity() {
         status.text = "Status: Ready"
         status.textSize = 17f
 
+        val overlayPermissionBtn = Button(this)
+        overlayPermissionBtn.text = "ALLOW FLOATING BOX PERMISSION"
+
+        val showBoxBtn = Button(this)
+        showBoxBtn.text = "SHOW OCR BOX"
+
+        val hideBoxBtn = Button(this)
+        hideBoxBtn.text = "HIDE OCR BOX"
+
         val startBtn = Button(this)
         startBtn.text = "START LIVE"
 
@@ -47,7 +56,34 @@ class MainActivity : Activity() {
         clearBtn.text = "CLEAR LOGS"
 
         val accessibilityBtn = Button(this)
-        accessibilityBtn.text = "ACCESSIBILITY PERMISSION"
+        accessibilityBtn.text = "ALLOW AUTO SCROLL / ACCESSIBILITY PERMISSION"
+
+        overlayPermissionBtn.setOnClickListener {
+            if (!Settings.canDrawOverlays(this)) {
+                val intent = Intent(
+                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                    Uri.parse("package:$packageName")
+                )
+                startActivity(intent)
+            } else {
+                status.text = "Status: Floating box permission already allowed"
+            }
+        }
+
+        showBoxBtn.setOnClickListener {
+            if (Settings.canDrawOverlays(this)) {
+                startService(Intent(this, OverlayService::class.java))
+                OverlayService.showBox()
+                status.text = "Status: OCR box shown"
+            } else {
+                status.text = "Status: Allow floating box permission first"
+            }
+        }
+
+        hideBoxBtn.setOnClickListener {
+            OverlayService.hideBox()
+            status.text = "Status: OCR box hidden"
+        }
 
         startBtn.setOnClickListener {
             startLive()
@@ -69,6 +105,9 @@ class MainActivity : Activity() {
 
         layout.addView(title)
         layout.addView(status)
+        layout.addView(overlayPermissionBtn)
+        layout.addView(showBoxBtn)
+        layout.addView(hideBoxBtn)
         layout.addView(startBtn)
         layout.addView(stopBtn)
         layout.addView(clearBtn)
@@ -85,7 +124,7 @@ class MainActivity : Activity() {
         )
 
         val version = TextView(this)
-        version.text = "Version: v0.8.7 Live Crop Stream"
+        version.text = "Version: v0.8.8 Live Crop Stream"
         version.textSize = 12f
         version.setTextColor(Color.GRAY)
         version.setPadding(0, 24, 0, 0)
@@ -102,7 +141,7 @@ class MainActivity : Activity() {
 
     private fun startLive() {
         if (!Settings.canDrawOverlays(this)) {
-            status.text = "Status: Allow overlay permission for crop square"
+            status.text = "Status: Allow overlay permission for crop box"
             val intent = Intent(
                 Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
                 Uri.parse("package:$packageName")
@@ -112,6 +151,7 @@ class MainActivity : Activity() {
         }
 
         startService(Intent(this, OverlayService::class.java))
+        OverlayService.showBox()
         val manager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
         startActivityForResult(manager.createScreenCaptureIntent(), requestCode)
     }

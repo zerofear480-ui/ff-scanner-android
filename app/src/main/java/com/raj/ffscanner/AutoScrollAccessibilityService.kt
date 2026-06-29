@@ -117,7 +117,7 @@ class AutoScrollAccessibilityService : AccessibilityService() {
                 }
             }, null)
         } catch (e: Exception) {
-            OverlayService.addLog("WS_ERROR command_dispatch=${e.message ?: "unknown"}")
+            OverlayService.addLog("COMMAND_DONE result=dispatch_error error=${e.message ?: "unknown"}")
             false
         }
 
