@@ -67,8 +67,12 @@ class AutoScrollAccessibilityService : AccessibilityService() {
     }
 
     fun performBackendSwipeUp(onComplete: () -> Unit) {
+        performBackendSwipe("BOTTOM_TO_TOP", onComplete)
+    }
+
+    fun performBackendSwipe(direction: String, onComplete: () -> Unit) {
         if (Looper.myLooper() != Looper.getMainLooper()) {
-            handler.post { performBackendSwipeUp(onComplete) }
+            handler.post { performBackendSwipe(direction, onComplete) }
             return
         }
 
@@ -80,7 +84,7 @@ class AutoScrollAccessibilityService : AccessibilityService() {
 
         backendSwipeRunning = true
         performScoreboardSwipe(
-            direction = "BOTTOM_TO_TOP",
+            direction = normalizeDirection(direction),
             completeOnGesture = true,
             onComplete = {
                 backendSwipeRunning = false
@@ -108,6 +112,7 @@ class AutoScrollAccessibilityService : AccessibilityService() {
 
         if (rect == null || rect.width() <= 30 || rect.height() <= 30) {
             OverlayService.addLog("AUTO_SCROLL_RECT x=0 y=0 w=0 h=0")
+            OverlayService.addLog("AUTO_SCROLL_SKIP reason=invalid_swipe_rect")
             OverlayService.addLog("AUTO_SCROLL_DISPATCH ok=false direction=$direction step=$step/3")
             if (completeOnGesture) {
                 onComplete()
@@ -124,6 +129,10 @@ class AutoScrollAccessibilityService : AccessibilityService() {
         val bottomY = rect.bottom - rect.height() * 0.10f
         val startY = if (direction == "BOTTOM_TO_TOP") bottomY else topY
         val endY = if (direction == "BOTTOM_TO_TOP") topY else bottomY
+        OverlayService.addLog(
+            "AUTO_SCROLL_EXECUTE start direction=$direction " +
+                "startX=${x.toInt()} startY=${startY.toInt()} endX=${x.toInt()} endY=${endY.toInt()}"
+        )
 
         val path = Path().apply {
             moveTo(x, startY)
@@ -147,6 +156,7 @@ class AutoScrollAccessibilityService : AccessibilityService() {
                 dispatchGesture(gesture, object : GestureResultCallback() {
                     override fun onCompleted(gestureDescription: GestureDescription?) {
                         super.onCompleted(gestureDescription)
+                        OverlayService.addLog("AUTO_SCROLL_EXECUTE result=completed direction=$direction")
                         OverlayService.addLog("AUTO_SCROLL_GESTURE_DONE")
                         OverlayService.setOcrBoxTouchEnabled(true)
                         if (completeOnGesture) {
@@ -159,6 +169,7 @@ class AutoScrollAccessibilityService : AccessibilityService() {
 
                     override fun onCancelled(gestureDescription: GestureDescription?) {
                         super.onCancelled(gestureDescription)
+                        OverlayService.addLog("AUTO_SCROLL_EXECUTE result=cancelled direction=$direction")
                         OverlayService.addLog("AUTO_SCROLL_GESTURE_CANCELLED")
                         OverlayService.setOcrBoxTouchEnabled(true)
                         if (completeOnGesture) {
@@ -173,6 +184,7 @@ class AutoScrollAccessibilityService : AccessibilityService() {
                 OverlayService.addLog("AUTO_SCROLL_DISPATCH_ERROR error=${e.message ?: "unknown"}")
                 false
             }
+            OverlayService.addLog("AUTO_SCROLL_EXECUTE result=dispatch_ok_$ok direction=$direction")
             OverlayService.addLog("AUTO_SCROLL_DISPATCH ok=$ok direction=$direction step=$step/3")
 
             if (!ok) {
@@ -199,5 +211,13 @@ class AutoScrollAccessibilityService : AccessibilityService() {
         if (!isRunning) return
         handler.removeCallbacks(scrollTask)
         handler.postDelayed(scrollTask, 1000)
+    }
+
+    private fun normalizeDirection(direction: String): String {
+        val normalized = direction.trim().uppercase(java.util.Locale.US).replace("-", "_")
+        return when (normalized) {
+            "TOP_TO_BOTTOM", "DOWN", "SCROLL_DOWN" -> "TOP_TO_BOTTOM"
+            else -> "BOTTOM_TO_TOP"
+        }
     }
 }

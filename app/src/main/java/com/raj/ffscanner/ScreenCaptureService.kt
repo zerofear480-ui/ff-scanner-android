@@ -24,6 +24,7 @@ import java.nio.ByteBuffer
 import java.io.File
 import java.io.FileOutputStream
 import java.io.ByteArrayOutputStream
+import java.util.concurrent.TimeUnit
 
 class ScreenCaptureService : Service() {
 
@@ -34,13 +35,21 @@ class ScreenCaptureService : Service() {
         private const val CAPTURE_INTERVAL_MS = 1000L
         private const val NO_CAPTURE_RESTART_MS = 3000L
         private const val MAX_CONTINUOUS_NULL_IMAGES = 3
+        private const val MAX_UPLOAD_ATTEMPTS = 3
+        private const val UPLOAD_RETRY_DELAY_MS = 750L
         private var instance: ScreenCaptureService? = null
     }
 
     private val channelId = "ff_scanner_channel"
     private val notificationId = 101
     private val handler = Handler(Looper.getMainLooper())
-    private val client = OkHttpClient()
+    private val client = OkHttpClient.Builder()
+        .retryOnConnectionFailure(true)
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .writeTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
+        .callTimeout(30, TimeUnit.SECONDS)
+        .build()
     private val scanRunnable = object : Runnable {
         override fun run() {
             scanLoop()
@@ -303,16 +312,22 @@ class ScreenCaptureService : Service() {
     }
 
     private fun handleBackendAutoScrollDecision(responseText: String, onComplete: () -> Unit) {
+        val decision = parseAutoScrollDecision(responseText)
+        OverlayService.addLog(
+            "BACKEND_DECISION shouldScroll=${decision.shouldScroll} " +
+                "endReached=${decision.endReached} direction=${decision.direction} reason=${decision.reason}"
+        )
+
         if (!autoScrollEnabled) {
+            OverlayService.addLog("OCR_ONLY_MODE_NO_SCROLL")
+            OverlayService.addLog("AUTO_SCROLL_SKIP reason=ocr_only_mode")
             onComplete()
             return
         }
 
-        val decision = parseAutoScrollDecision(responseText)
-        OverlayService.addLog("BACKEND_DECISION shouldScroll=${decision.shouldScroll} reason=${decision.reason}")
-
         if (decision.endReached) {
             OverlayService.addLog("AUTO_SCROLL_END_REACHED")
+            OverlayService.addLog("AUTO_SCROLL_SKIP reason=backend_endReached_true backendReason=${decision.reason}")
             autoScrollEnabled = false
             AutoScrollAccessibilityService.instance?.stopBackendAutoScroll()
             onComplete()
@@ -320,20 +335,21 @@ class ScreenCaptureService : Service() {
         }
 
         if (!decision.shouldScroll) {
-            OverlayService.addLog("AUTO_SCROLL_SKIP reason=${decision.reason}")
+            OverlayService.addLog("AUTO_SCROLL_SKIP reason=backend_shouldScroll_false backendReason=${decision.reason}")
             onComplete()
             return
         }
 
         val service = AutoScrollAccessibilityService.instance
         if (service == null) {
+            OverlayService.addLog("AUTO_SCROLL_PERMISSION_MISSING")
             OverlayService.addLog("AUTO_SCROLL_SKIP reason=accessibility_service_missing")
             onComplete()
             return
         }
 
-        OverlayService.addLog("AUTO_SCROLL_EXECUTE direction=BOTTOM_TO_TOP")
-        service.performBackendSwipeUp {
+        OverlayService.addLog("AUTO_SCROLL_EXECUTE requested direction=${decision.direction}")
+        service.performBackendSwipe(direction = decision.direction) {
             onComplete()
         }
     }
@@ -342,25 +358,73 @@ class ScreenCaptureService : Service() {
         return try {
             val root = JSONObject(responseText)
             val autoScroll = root.optJSONObject("autoScroll")
-            if (autoScroll == null) {
-                AutoScrollDecision(
-                    shouldScroll = false,
-                    endReached = false,
-                    reason = "missing_autoScroll"
-                )
-            } else {
-                AutoScrollDecision(
-                    shouldScroll = autoScroll.optBoolean("shouldScroll", false),
-                    endReached = autoScroll.optBoolean("endReached", false),
-                    reason = autoScroll.optString("reason", "none").ifBlank { "none" }
-                )
+                ?: root.optJSONObject("auto_scroll")
+                ?: root
+
+            val source = when {
+                root.has("autoScroll") -> "autoScroll"
+                root.has("auto_scroll") -> "auto_scroll"
+                root.has("shouldScroll") || root.has("should_scroll") -> "root"
+                else -> "missing_autoScroll"
             }
+            val parsedReason = optFlexibleString(autoScroll, "reason", "none").ifBlank { "none" }
+
+            AutoScrollDecision(
+                shouldScroll = optFlexibleBoolean(autoScroll, "shouldScroll", "should_scroll", false),
+                endReached = optFlexibleBoolean(autoScroll, "endReached", "end_reached", false),
+                direction = normalizeScrollDirection(
+                    optFlexibleString(autoScroll, "direction", "scrollDirection", "scroll_direction")
+                ),
+                reason = if (source == "missing_autoScroll" && parsedReason == "none") source else parsedReason,
+                source = source
+            )
         } catch (e: Exception) {
             AutoScrollDecision(
                 shouldScroll = false,
                 endReached = false,
-                reason = "parse_error"
+                direction = "BOTTOM_TO_TOP",
+                reason = "parse_error",
+                source = "parse_error"
             )
+        }
+    }
+
+    private fun optFlexibleBoolean(
+        obj: JSONObject,
+        primaryKey: String,
+        fallbackKey: String,
+        defaultValue: Boolean
+    ): Boolean {
+        val key = when {
+            obj.has(primaryKey) -> primaryKey
+            obj.has(fallbackKey) -> fallbackKey
+            else -> return defaultValue
+        }
+        val value = obj.opt(key) ?: return defaultValue
+        return when (value) {
+            is Boolean -> value
+            is Number -> value.toInt() != 0
+            is String -> value.equals("true", ignoreCase = true) ||
+                value == "1" ||
+                value.equals("yes", ignoreCase = true)
+            else -> defaultValue
+        }
+    }
+
+    private fun optFlexibleString(obj: JSONObject, vararg keys: String): String {
+        for (key in keys) {
+            if (obj.has(key)) return obj.optString(key, "")
+        }
+        return ""
+    }
+
+    private fun normalizeScrollDirection(rawDirection: String): String {
+        val normalized = rawDirection.trim()
+            .uppercase(java.util.Locale.US)
+            .replace("-", "_")
+        return when (normalized) {
+            "TOP_TO_BOTTOM", "DOWN", "SCROLL_DOWN" -> "TOP_TO_BOTTOM"
+            else -> "BOTTOM_TO_TOP"
         }
     }
 
@@ -733,55 +797,140 @@ private fun parseNamesOnly(text: String): List<String> {
                 .build()
 
             val scanId = System.currentTimeMillis().toString()
-            val req = Request.Builder()
-                .url(apiUrl)
-                .addHeader("X-Scan-Id", scanId)
-                .post(body)
-                .build()
-
             val uploadStartMs = System.currentTimeMillis()
             OverlayService.addLog("UPLOAD_START id=$scanId ts=$uploadStartMs bytes=${bytes.size}")
             OverlayService.addLog("UPLOAD_WAIT_RESPONSE")
+            enqueueCropUpload(
+                reqBody = body,
+                scanId = scanId,
+                activeScanId = activeScanId,
+                uploadStartMs = uploadStartMs,
+                bytesSize = bytes.size,
+                attempt = 1,
+                onComplete = onComplete
+            )
+        } catch (e: Exception) {
+            OverlayService.addLog("UPLOAD_ERROR error=${e.message ?: "unknown"}")
+            onComplete()
+        }
+    }
 
-            client.newCall(req).enqueue(object : Callback {
-                override fun onFailure(call: Call, e: java.io.IOException) {
-                    OverlayService.addLog("UPLOAD_ERROR id=$scanId totalMs=${System.currentTimeMillis() - uploadStartMs} error=${e.message ?: "unknown"}")
-                    handler.post {
-                        if (activeScanId == this@ScreenCaptureService.activeScanId) {
-                            if (autoScrollEnabled) {
-                                OverlayService.addLog("AUTO_SCROLL_SKIP reason=upload_error")
-                            }
-                            onComplete()
-                        }
-                    }
+    private fun enqueueCropUpload(
+        reqBody: RequestBody,
+        scanId: String,
+        activeScanId: Long,
+        uploadStartMs: Long,
+        bytesSize: Int,
+        attempt: Int,
+        onComplete: () -> Unit
+    ) {
+        val attemptStartMs = System.currentTimeMillis()
+        OverlayService.addLog("UPLOAD_ATTEMPT id=$scanId attempt=$attempt ts=$attemptStartMs")
+
+        val req = Request.Builder()
+            .url(apiUrl)
+            .addHeader("X-Scan-Id", scanId)
+            .addHeader("X-Upload-Attempt", attempt.toString())
+            .post(reqBody)
+            .build()
+
+        client.newCall(req).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: java.io.IOException) {
+                val totalMs = System.currentTimeMillis() - uploadStartMs
+                OverlayService.addLog("UPLOAD_ERROR id=$scanId attempt=$attempt totalMs=$totalMs error=${e.message ?: "unknown"}")
+                retryOrFinishUpload(
+                    reqBody = reqBody,
+                    scanId = scanId,
+                    activeScanId = activeScanId,
+                    uploadStartMs = uploadStartMs,
+                    bytesSize = bytesSize,
+                    attempt = attempt,
+                    responseText = "",
+                    finalReason = "upload_error",
+                    onComplete = onComplete
+                )
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                val headerMs = System.currentTimeMillis() - attemptStartMs
+                val code = response.code
+                val bodyStartMs = System.currentTimeMillis()
+                val responseText = try {
+                    response.body?.string() ?: ""
+                } catch (e: Exception) {
+                    ""
                 }
+                val bodyReadMs = System.currentTimeMillis() - bodyStartMs
+                response.close()
+                val totalMs = System.currentTimeMillis() - uploadStartMs
 
-                override fun onResponse(call: Call, response: Response) {
-                    val headerMs = System.currentTimeMillis() - uploadStartMs
-                    val code = response.code
-                    val bodyStartMs = System.currentTimeMillis()
-                    val responseText = try {
-                        response.body?.string() ?: ""
-                    } catch (e: Exception) {
-                        ""
-                    }
-                    val bodyReadMs = System.currentTimeMillis() - bodyStartMs
-                    response.close()
-                    val totalMs = System.currentTimeMillis() - uploadStartMs
+                OverlayService.addLog("UPLOAD_HEADERS id=$scanId attempt=$attempt headerMs=$headerMs code=$code")
+                OverlayService.addLog("UPLOAD_BODY id=$scanId attempt=$attempt bodyReadMs=$bodyReadMs respBytes=${responseText.length}")
 
-                    OverlayService.addLog("UPLOAD_HEADERS id=$scanId headerMs=$headerMs code=$code")
-                    OverlayService.addLog("UPLOAD_BODY id=$scanId bodyReadMs=$bodyReadMs respBytes=${responseText.length}")
-                    OverlayService.addLog("UPLOAD_DONE id=$scanId totalMs=$totalMs code=$code bytes=${bytes.size}")
+                if (code in 200..299) {
+                    OverlayService.addLog("UPLOAD_DONE id=$scanId attempt=$attempt totalMs=$totalMs code=$code bytes=$bytesSize")
                     handler.post {
                         if (activeScanId == this@ScreenCaptureService.activeScanId) {
                             handleBackendAutoScrollDecision(responseText, onComplete)
                         }
                     }
+                } else {
+                    OverlayService.addLog("UPLOAD_HTTP_RETRYABLE id=$scanId attempt=$attempt totalMs=$totalMs code=$code")
+                    retryOrFinishUpload(
+                        reqBody = reqBody,
+                        scanId = scanId,
+                        activeScanId = activeScanId,
+                        uploadStartMs = uploadStartMs,
+                        bytesSize = bytesSize,
+                        attempt = attempt,
+                        responseText = responseText,
+                        finalReason = "http_$code",
+                        onComplete = onComplete
+                    )
                 }
-            })
-        } catch (e: Exception) {
-            OverlayService.addLog("UPLOAD_ERROR error=${e.message ?: "unknown"}")
-            onComplete()
+            }
+        })
+    }
+
+    private fun retryOrFinishUpload(
+        reqBody: RequestBody,
+        scanId: String,
+        activeScanId: Long,
+        uploadStartMs: Long,
+        bytesSize: Int,
+        attempt: Int,
+        responseText: String,
+        finalReason: String,
+        onComplete: () -> Unit
+    ) {
+        if (attempt < MAX_UPLOAD_ATTEMPTS) {
+            val nextAttempt = attempt + 1
+            OverlayService.addLog("UPLOAD_RETRY id=$scanId nextAttempt=$nextAttempt ts=${System.currentTimeMillis()} reason=$finalReason")
+            handler.postDelayed({
+                if (activeScanId == this@ScreenCaptureService.activeScanId && scanRunning) {
+                    enqueueCropUpload(
+                        reqBody = reqBody,
+                        scanId = scanId,
+                        activeScanId = activeScanId,
+                        uploadStartMs = uploadStartMs,
+                        bytesSize = bytesSize,
+                        attempt = nextAttempt,
+                        onComplete = onComplete
+                    )
+                }
+            }, UPLOAD_RETRY_DELAY_MS)
+            return
+        }
+
+        val totalMs = System.currentTimeMillis() - uploadStartMs
+        OverlayService.addLog("UPLOAD_FINAL_FAIL id=$scanId attempts=$attempt totalMs=$totalMs reason=$finalReason")
+        handler.post {
+            if (activeScanId == this@ScreenCaptureService.activeScanId) {
+                if (autoScrollEnabled) {
+                    OverlayService.addLog("AUTO_SCROLL_SKIP reason=$finalReason")
+                }
+                handleBackendAutoScrollDecision(responseText, onComplete)
+            }
         }
     }
 
@@ -948,7 +1097,9 @@ private fun sendPlayers(players: List<PlayerData>, onComplete: () -> Unit = {}) 
     data class AutoScrollDecision(
         val shouldScroll: Boolean,
         val endReached: Boolean,
-        val reason: String
+        val direction: String,
+        val reason: String,
+        val source: String
     )
 }
 
