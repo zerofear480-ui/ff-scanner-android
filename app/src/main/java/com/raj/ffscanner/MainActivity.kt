@@ -124,7 +124,7 @@ class MainActivity : Activity() {
         )
 
         val version = TextView(this)
-        version.text = "Version: v0.8.8 Live Crop Stream"
+        version.text = "Version: v0.8.9 Live Crop Stream"
         version.textSize = 12f
         version.setTextColor(Color.GRAY)
         version.setPadding(0, 24, 0, 0)

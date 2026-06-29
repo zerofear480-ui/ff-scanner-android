@@ -81,6 +81,7 @@ class OverlayService : Service() {
     private val handler = Handler(Looper.getMainLooper())
     private val minSize = 250
     private var boxAdded = false
+    private var panelAdded = false
 
     override fun onCreate() {
         super.onCreate()
@@ -309,6 +310,7 @@ class OverlayService : Service() {
         }
 
         wm.addView(panel, panelParams)
+        panelAdded = true
 
         handler.post(object : Runnable {
             override fun run() {
@@ -347,23 +349,37 @@ class OverlayService : Service() {
     }
 
     private fun showBoxInternal() {
-        if (!::box.isInitialized || boxAdded) return
+        if (!::box.isInitialized || !::panel.isInitialized) return
         try {
-            wm.addView(box, boxParams)
-            boxAdded = true
-            addLog("OCR_BOX_SHOWN")
+            if (!boxAdded) {
+                wm.addView(box, boxParams)
+                boxAdded = true
+                addLog("OCR_BOX_SHOWN")
+            }
+            if (!panelAdded) {
+                wm.addView(panel, panelParams)
+                panelAdded = true
+                addLog("OVERLAY_UI_SHOWN")
+            }
         } catch (e: Exception) {
             addLog("OCR_BOX_SHOW_FAILED error=${e.message ?: "unknown"}")
         }
     }
 
     private fun hideBoxInternal() {
-        if (!::box.isInitialized || !boxAdded) return
-        saveBox()
+        if (!::box.isInitialized || !::panel.isInitialized) return
+        if (boxAdded) saveBox()
         try {
-            wm.removeView(box)
-            boxAdded = false
-            addLog("OCR_BOX_HIDDEN")
+            if (boxAdded) {
+                wm.removeView(box)
+                boxAdded = false
+                addLog("OCR_BOX_HIDDEN")
+            }
+            if (panelAdded) {
+                wm.removeView(panel)
+                panelAdded = false
+                addLog("OVERLAY_UI_HIDDEN")
+            }
         } catch (e: Exception) {
             addLog("OCR_BOX_HIDE_FAILED error=${e.message ?: "unknown"}")
         }
@@ -394,7 +410,7 @@ class OverlayService : Service() {
     override fun onDestroy() {
         if (boxAdded) saveBox()
         try { if (boxAdded) wm.removeView(box) } catch (_: Exception) {}
-        try { wm.removeView(panel) } catch (_: Exception) {}
+        try { if (panelAdded) wm.removeView(panel) } catch (_: Exception) {}
         super.onDestroy()
         instance = null
     }

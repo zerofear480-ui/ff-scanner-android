@@ -37,6 +37,7 @@ class ScreenCaptureService : Service() {
     companion object {
         const val ACTION_START_LIVE = "com.raj.ffscanner.START_LIVE"
         const val ACTION_STOP_LIVE = "com.raj.ffscanner.STOP_LIVE"
+        private const val BACKEND_URL = "http://13.203.102.124:8000"
         private const val WS_URL = "ws://13.203.102.124:8000/ws/live-crop"
         private const val FRAME_INTERVAL_MS = 200L
         private const val JPEG_QUALITY = 55
@@ -180,6 +181,8 @@ class ScreenCaptureService : Service() {
 
     private fun openWebSocket() {
         OverlayService.addLog("WS_CONNECTING")
+        OverlayService.addLog("BACKEND_URL=$BACKEND_URL")
+        OverlayService.addLog("WS_URL=$WS_URL")
         val request = Request.Builder().url(WS_URL).build()
         webSocket = client.newWebSocket(request, object : WebSocketListener() {
             override fun onOpen(webSocket: WebSocket, response: Response) {
@@ -195,7 +198,11 @@ class ScreenCaptureService : Service() {
 
             override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
                 wsConnected = false
-                OverlayService.addLog("WS_FAILURE error=${t.message ?: "unknown"}")
+                val responseText = response?.let { " code=${it.code} message=${it.message}" } ?: ""
+                OverlayService.addLog("WS_FAILURE url=$WS_URL$responseText error=${t.message ?: "unknown"}")
+                if (response?.code == 404) {
+                    OverlayService.addLog("WS_404_URL=$WS_URL")
+                }
             }
 
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
