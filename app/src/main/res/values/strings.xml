@@ -2,4 +2,5 @@
 <resources>
     <string name="app_name">FF Scanner</string>
     <string name="accessibility_service_description">FF Scanner auto scroll service</string>
+    <string name="default_ocr_server_url">http://10.129.39.155:8000/api/ocr-scan</string>
 </resources>

@@ -56,7 +56,7 @@ class ScreenCaptureService : Service() {
     private var nextScanId = 0L
     private var activeScanId = 0L
     private var lastCropUploadAt = 0L
-    private var apiUrl = "http://13.203.102.124:8000/api/ocr-scan"
+    private var apiUrl = "http://10.129.39.155:8000/api/ocr-scan"
 
     private val projectionCallback = object : MediaProjection.Callback() {
         override fun onStop() {

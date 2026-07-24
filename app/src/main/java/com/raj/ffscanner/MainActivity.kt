@@ -2,6 +2,7 @@ package com.raj.ffscanner
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.Intent
 import android.graphics.Color
 import android.media.projection.MediaProjectionManager
@@ -10,16 +11,31 @@ import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
 import android.widget.Button
+import android.widget.EditText
 import android.widget.LinearLayout
 import android.widget.Space
 import android.widget.TextView
+import okhttp3.Call
+import okhttp3.Callback
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import java.io.IOException
+import java.util.concurrent.TimeUnit
 
 class MainActivity : Activity() {
     private val requestCode = 1001
     private lateinit var status: TextView
+    private lateinit var ocrServerUrl: String
+    private val settingsClient = OkHttpClient.Builder()
+        .retryOnConnectionFailure(false)
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(5, TimeUnit.SECONDS)
+        .build()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        ocrServerUrl = OcrServerSettings.getUrl(this)
 
         if (Build.VERSION.SDK_INT >= 33) {
             requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), 2001)
@@ -57,6 +73,9 @@ class MainActivity : Activity() {
 
         val accessibilityBtn = Button(this)
         accessibilityBtn.text = "ALLOW AUTO SCROLL / ACCESSIBILITY PERMISSION"
+
+        val settingsBtn = Button(this)
+        settingsBtn.text = "OCR SERVER SETTINGS"
 
         overlayPermissionBtn.setOnClickListener {
             if (!Settings.canDrawOverlays(this)) {
@@ -103,6 +122,10 @@ class MainActivity : Activity() {
             status.text = "Status: Enable FF Scanner accessibility service"
         }
 
+        settingsBtn.setOnClickListener {
+            showOcrServerSettings()
+        }
+
         layout.addView(title)
         layout.addView(status)
         layout.addView(overlayPermissionBtn)
@@ -112,6 +135,7 @@ class MainActivity : Activity() {
         layout.addView(stopBtn)
         layout.addView(clearBtn)
         layout.addView(accessibilityBtn)
+        layout.addView(settingsBtn)
 
         val spacer = Space(this)
         layout.addView(
@@ -160,6 +184,91 @@ class MainActivity : Activity() {
         stopService(Intent(this, ScreenCaptureService::class.java))
         AutoScrollAccessibilityService.instance?.stopCommandExecution()
         status.text = "Status: Live stopped"
+    }
+
+    private fun showOcrServerSettings() {
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(48, 16, 48, 0)
+        }
+        val label = TextView(this).apply {
+            text = "OCR Server URL"
+        }
+        val urlInput = EditText(this).apply {
+            setText(OcrServerSettings.getUrl(this@MainActivity))
+            isSingleLine = true
+        }
+        val connectionStatus = TextView(this).apply {
+            setPadding(0, 16, 0, 0)
+        }
+        content.addView(label)
+        content.addView(urlInput)
+        content.addView(connectionStatus)
+
+        val dialog = AlertDialog.Builder(this)
+            .setTitle("OCR Server Settings")
+            .setView(content)
+            .setPositiveButton("SAVE", null)
+            .setNeutralButton("TEST CONNECTION", null)
+            .setNegativeButton("CANCEL", null)
+            .create()
+
+        dialog.setOnShowListener {
+            dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
+                val url = urlInput.text.toString().trim()
+                if (!OcrServerSettings.isValid(url)) {
+                    connectionStatus.text = "Invalid URL"
+                    return@setOnClickListener
+                }
+
+                OcrServerSettings.saveUrl(this, url)
+                ocrServerUrl = url
+                status.text = "Status: OCR server URL saved"
+                dialog.dismiss()
+            }
+
+            dialog.getButton(AlertDialog.BUTTON_NEUTRAL).setOnClickListener {
+                val url = urlInput.text.toString().trim()
+                if (!OcrServerSettings.isValid(url)) {
+                    connectionStatus.text = "Invalid URL"
+                    return@setOnClickListener
+                }
+
+                connectionStatus.text = "Testing..."
+                testOcrServerConnection(url, dialog, connectionStatus)
+            }
+        }
+        dialog.show()
+    }
+
+    private fun testOcrServerConnection(
+        url: String,
+        dialog: AlertDialog,
+        connectionStatus: TextView
+    ) {
+        val request = Request.Builder()
+            .url(url)
+            .head()
+            .build()
+
+        settingsClient.newCall(request).enqueue(object : Callback {
+            override fun onFailure(call: Call, e: IOException) {
+                runOnUiThread {
+                    if (dialog.isShowing) {
+                        connectionStatus.text = "❌ Failed"
+                    }
+                }
+            }
+
+            override fun onResponse(call: Call, response: Response) {
+                response.close()
+                runOnUiThread {
+                    if (dialog.isShowing) {
+                        connectionStatus.text = "✅ Connected"
+                    }
+                }
+            }
+        })
     }
 
     override fun onActivityResult(req: Int, res: Int, data: Intent?) {
